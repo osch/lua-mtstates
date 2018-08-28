@@ -1,5 +1,7 @@
 # mtstates 
 [![Licence](http://img.shields.io/badge/Licence-MIT-brightgreen.svg)](LICENSE)
+[![Build Status](https://travis-ci.org/osch/lua-mtstates.svg?branch=master)](https://travis-ci.org/osch/lua-mtstates)
+[![Build status](https://ci.appveyor.com/api/projects/status/v8t6rsf45dwt60pl?svg=true)](https://ci.appveyor.com/project/osch/lua-mtstates)
 
 <!-- ---------------------------------------------------------------------------------------- -->
 
