@@ -42,11 +42,13 @@ before_install:
 
 install:
   - luarocks install lua-llthreads2
+  - luarocks install mtmsg
   - luarocks make rockspecs/mtstates-scm-0.rockspec
 
 script: 
   - cd examples
   - lua example01.lua
+  - lua example02.lua
   - cd ../tests
   - lua test01.lua
 
