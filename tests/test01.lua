@@ -18,7 +18,7 @@ assert(err == mts.error.object_exists)
 s1 = nil
 collectgarbage()
 local s1 = mts.newstate("s1", function()
-    x = s1
+    x = 1
     y = 2
     return function(x) return x + 2 end
 end)
