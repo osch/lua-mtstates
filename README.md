@@ -1,7 +1,7 @@
 # mtstates 
 [![Licence](http://img.shields.io/badge/Licence-MIT-brightgreen.svg)](LICENSE)
 [![Build Status](https://travis-ci.org/osch/lua-mtstates.svg?branch=master)](https://travis-ci.org/osch/lua-mtstates)
-[![Build status](https://ci.appveyor.com/api/projects/status/v8t6rsf45dwt60pl?svg=true)](https://ci.appveyor.com/project/osch/lua-mtstates)
+[![Build status](https://ci.appveyor.com/api/projects/status/v8t6rsf45dwt60pl/branch/master?svg=true)](https://ci.appveyor.com/project/osch/lua-mtstates/branch/master)
 
 <!-- ---------------------------------------------------------------------------------------- -->
 
@@ -14,6 +14,8 @@ underlying threading library (e.g. [Lanes] or [lua-llthreads2]).
 The general principle is to prepare a state that returns a callback function that can be
 called from different threads. This can be useful in a thread-pool scenario when the
 number of states exceeds the number of available threads.
+
+This package is also available via LuaRocks, see https://luarocks.org/modules/osch/mtstates.
 
 [Lua]:               https://www.lua.org
 [Lanes]:             https://luarocks.org/modules/benoitgermain/lanes
