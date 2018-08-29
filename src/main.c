@@ -25,12 +25,6 @@ static int internalError(lua_State* L, const char* text, int line)
 }
 
 
-
-static const luaL_Reg ModuleFunctions[] = 
-{
-    { NULL,            NULL } /* sentinel */
-};
-
 static int handleClosingLuaState(lua_State* L)
 {
     async_mutex_lock(mtstates_global_lock);
@@ -43,14 +37,36 @@ static int handleClosingLuaState(lua_State* L)
 }
 
 
+static int Mtstates_type(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    int tp = lua_type(L, 1);
+    if (tp == LUA_TUSERDATA) {
+        if (lua_getmetatable(L, 1)) {
+            if (lua_getfield(L, -1, "__name") == LUA_TSTRING) {
+                lua_pushvalue(L, -1);
+                if (lua_gettable(L, LUA_REGISTRYINDEX) == LUA_TTABLE) {
+                    if (lua_rawequal(L, -3, -1)) {
+                        lua_pop(L, 1);
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    lua_pushstring(L, lua_typename(L, tp));
+    return 1;
+}
+
+static const luaL_Reg ModuleFunctions[] = 
+{
+    { "type",    Mtstates_type },      
+    { NULL,      NULL          } /* sentinel */
+};
+
 DLL_PUBLIC int luaopen_mtstates(lua_State* L)
 {
-#if LUA_VERSION_NUM >= 502
-    int luaVersion = (int)*lua_version(L);
-    if (luaVersion != LUA_VERSION_NUM) {
-        return luaL_error(L, "lua version mismatch: mtstates was compiled for %d, but current version is %d", LUA_VERSION_NUM, luaVersion);
-    }
-#endif
+    luaL_checkversion(L); /* does nothing if compiled for Lua 5.1 */
 
     /* ---------------------------------------- */
 
@@ -122,10 +138,6 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
     int stateMeta = ++n; luaL_newmetatable(L, MTSTATES_STATE_CLASS_NAME);
     int stateClass= ++n; lua_newtable(L);
 
-    int errorMeta = ++n; luaL_newmetatable(L, MTSTATES_ERROR_CLASS_NAME);
-    int errorClass= ++n; lua_newtable(L);
-
-
     lua_pushvalue(L, module);
         luaL_setfuncs(L, ModuleFunctions, 0);
     lua_pop(L, 1);
@@ -139,14 +151,10 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
     lua_pushvalue(L, errorModule);
     lua_setfield(L, module, "error");
 
-    lua_pushvalue(L, errorClass);
-    lua_setfield (L, errorMeta, "__index");
-
-
     lua_checkstack(L, LUA_MINSTACK);
     
     mtstates_state_init_module   (L, module,      stateMeta,    stateClass);
-    mtstates_error_init_module   (L, errorModule, errorMeta,    errorClass);
+    mtstates_error_init_module   (L, errorModule);
     
     lua_settop(L, module);
     return 1;

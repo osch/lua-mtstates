@@ -100,17 +100,17 @@ static const char* udataToLuaString(lua_State* L, StateUserData* udata)
 
 static int errormsghandler(lua_State* L)
 {
-  const char* msg = lua_tostring(L, 1);
-  if (msg == NULL) {  /* is error object not a string? */
-    if (luaL_callmeta(L, 1, "__tostring") &&  /* does it have a metamethod */
-        lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
-      return 1;  /* that is the message */
-    else
-      msg = lua_pushfstring(L, "(error object is a %s value)",
-                               luaL_typename(L, 1));
-  }
-  luaL_traceback(L, L, msg, 1);  /* append a standard traceback */
-  return 1;  /* return the traceback */
+    const char* msg = lua_tostring(L, 1);
+    if (msg == NULL) {  /* is error object not a string? */
+        if (   luaL_callmeta(L, 1, "__tostring")  /* does it have a metamethod */
+            && lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
+            return 1;  /* that is the message */
+        else
+            msg = lua_pushfstring(L, "(error object is a %s value)",
+                                   luaL_typename(L, 1));
+    }
+    mtstates_push_ERROR_INVOKING_STATE(L, msg);
+    return 1;  /* return the traceback */
 }
 
 static int dumpWriter(lua_State* L, const void* p, size_t sz, void* ud)
@@ -263,6 +263,8 @@ static int Mtstates_newState(lua_State* L)
     if (openlibs) {
         luaL_openlibs(L2);
     }
+    mtstates_error_init_meta(L2);
+    
     lua_pushcfunction(L2, errormsghandler);
     int msghandler = ++l2top;
     
@@ -300,30 +302,47 @@ static int Mtstates_newState(lua_State* L)
     }
     rc = lua_pcall(L2, nargs - arg + 1, LUA_MULTRET, msghandler);
     if (rc != LUA_OK) {
-        size_t errorMessageLength;
-        const char* errorMessage = luaL_tolstring(L2, -1, &errorMessageLength);
-        lua_pushlstring(L, errorMessage, errorMessageLength);
+        int ltop = lua_gettop(L);
+        Error* e = luaL_testudata(L2, -1, MTSTATES_ERROR_CLASS_NAME);
+        int details      = 0;
+        int traceback    = 0;
+        if (e) {
+            lua_pushstring(L, mtstates_error_details(L2, e));   details   = ++ltop;
+            lua_pushstring(L, mtstates_error_traceback(L2, e)); traceback = ++ltop;
+        } else {
+            size_t errorMessageLength;
+            const char* errorString = luaL_tolstring(L2, -1, &errorMessageLength);
+            lua_pushlstring(L, errorString, errorMessageLength); details = ++ltop;
+        }
         lua_close(L2);
         async_lock_release(&s->stateLock);
-        return lua_error(L);
+        if (e) {
+            return mtstates_ERROR_INVOKING_STATE_traceback(L, NULL,
+                                                              lua_tostring(L, details),
+                                                              lua_tostring(L, traceback));
+        } else {
+            return mtstates_ERROR_INVOKING_STATE(L, NULL, lua_tostring(L, details));
+        }
     }
     int firstrslt = func;
     int lastrslt  = lua_gettop(L2);
     int nrslts = lastrslt - firstrslt + 1;
-    if (nrslts < 1 || lua_type(L2, firstrslt) != LUA_TFUNCTION) {
-        lua_close(L2);
-        async_lock_release(&s->stateLock);
-        return luaL_error(L, "first result value must be function");
+    if (nrslts >= 2) {
+        rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L);
+        if (rc != 0) {
+            lua_close(L2);
+            async_lock_release(&s->stateLock);
+            return luaL_error(L, "bad result arg %d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+        }
     }
-    rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L);
-    if (rc != 0) {
-        lua_close(L2);
-        async_lock_release(&s->stateLock);
-        return luaL_error(L, "bad result arg %d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+    s->L2 = L2;
+    if (nrslts >= 1) {
+        lua_pushvalue(L2, firstrslt);
+        s->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
+    } else {
+        ++nrslts; /* interpret first rslt as nil */
+        s->callbackref = LUA_REFNIL;
     }
-    s->L2          = L2;
-    lua_pushvalue(L2, firstrslt);
-    s->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
     
     /* ------------------------------------------------------------------------------------ */
 
@@ -452,12 +471,28 @@ static int MtState_call(lua_State* L)
     }
     rc = lua_pcall(L2, lastarg - arg + 1, LUA_MULTRET, msghandler);
     if (rc != LUA_OK) {
-        size_t errorMessageLength;
-        const char* errorMessage = luaL_tolstring(L2, -1, &errorMessageLength);
-        lua_pushlstring(L, errorMessage, errorMessageLength);
+        int ltop = lua_gettop(L);
+        Error* e = luaL_testudata(L2, -1, MTSTATES_ERROR_CLASS_NAME);
+        int details      = 0;
+        int traceback    = 0;
+        if (e) {
+            lua_pushstring(L, mtstates_error_details(L2, e));   details   = ++ltop;
+            lua_pushstring(L, mtstates_error_traceback(L2, e)); traceback = ++ltop;
+        } else {
+            size_t errorMessageLength;
+            const char* errorString = luaL_tolstring(L2, -1, &errorMessageLength);
+            lua_pushlstring(L, errorString, errorMessageLength); details = ++ltop;
+        }
         lua_settop(L2, l2start);
         async_lock_release(&s->stateLock);
-        return lua_error(L);
+        const char* stateString = mtstates_state_tostring(L, s);
+        if (e) {
+            return mtstates_ERROR_INVOKING_STATE_traceback(L, stateString,
+                                                              lua_tostring(L, details),
+                                                              lua_tostring(L, traceback));
+        } else {
+            return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L, details));
+        }
     }
     int firstrslt = func;
     int lastrslt  = lua_gettop(L2);
@@ -541,6 +576,9 @@ int mtstates_state_init_module(lua_State* L, int module, int stateMeta, int stat
     
     lua_pop(L, 3);
 
+    lua_pushstring(L, MTSTATES_STATE_CLASS_NAME);
+    lua_setfield(L, stateMeta, "__metatable");
+    
     return 0;
 }
 
