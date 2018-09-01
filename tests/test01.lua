@@ -195,6 +195,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
+    print("-- Expected details:")
+    print(err:details())
     print("-------------------------------------")
     assert(err == mts.error.invoking_state)
 end
@@ -239,6 +241,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
+    print("-- Expected details:")
+    print(err:details())
     print("-------------------------------------")
     assert(mtstates.error.invoking_state == err)
 end
@@ -369,6 +373,57 @@ do
         return function() end
     end)
     assert(s:name() == nil)
+end
+PRINT("==================================================================================")
+do
+    local s = mts.newstate(function() 
+        return function(arg)
+            return arg + 5 
+        end
+    end)
+    
+    local _, err = pcall(function()
+        s:interrupt("")
+    end)
+    print("-------------------------------------")
+    print("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+
+    s:interrupt(nil)
+    local _, err = pcall(function()
+        s:call(100)
+    end)
+    print("-------------------------------------")
+    print("-- Expected error:")
+    print(err)
+    print("-- Expected details:")
+    print(err:details())
+    print("-------------------------------------")
+    assert(err == mtstates.error.interrupted)
+    
+    assert(s:call(200) == 205)
+    
+    s:interrupt()
+    local _, err = pcall(function()
+        s:call(100)
+    end)
+    assert(err == mtstates.error.interrupted)
+    
+    assert(s:call(300) == 305)
+
+    s:interrupt(true)
+    for i = 1, 4 do
+        local _, err = pcall(function()
+            s:call(100)
+        end)
+        print("-- Expected error:", err:name(), err:details())
+        assert(err == mtstates.error.interrupted)
+    end
+    
+    s:interrupt(false)
+    assert(s:call(400) == 405)
+    
 end
 PRINT("==================================================================================")
 print("Done.")

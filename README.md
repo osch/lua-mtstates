@@ -63,9 +63,9 @@ assert("Hello World" == state:call("get"))
 ```
 
 Concurrent access to the same Lua state from different threads is prohibited and
-leads to an error. Therefore state access has to be synchronised by the caller.
+leads to an error. Therefore state access has to be synchronized by the caller.
 The following example uses  [mtmsg]( https://github.com/osch/lua-mtmsg#mtmsg) to
-synchronise acces to the state:
+synchronize access to the state:
 
 ```lua
 local llthreads = require("llthreads2.ex")
@@ -133,6 +133,7 @@ assert(thread:join())
        * state:id()
        * state:name()
        * state:call()
+       * state:interrupt()
        * state:close()
    * [Error Methods](#error-methods)
        * error:name()
@@ -142,6 +143,7 @@ assert(thread:join())
        * err1 == err2
    * [Errors](#errors)
        * mtstates.error.concurrent_access
+       * mtstates.error.interrupted
        * mtstates.error.invoking_state
        * mtstates.error.object_closed
        * mtstates.error.object_exists
@@ -232,10 +234,22 @@ assert(thread:join())
             boolean, nil, light user data).
 
   Possible errors: *mtstates.error.concurrent_access*,
-                   *mtstates.error.object_closed*,
+                   *mtstates.error.interrupted*,
                    *mtstates.error.invoking_state*,
+                   *mtstates.error.object_closed*,
                    *mtstates.error.state_result*
 
+* **`state:interrupt([flag])`**
+
+  Interrupts the state by installing a debug hook that triggers an error
+  *mtstates.error.interrupted*. Therefore the interrupt only occurs when lua
+  code is invoked. If the state is within a c function the interrupt occurs
+  when the c function returns.
+
+  * *flag* - optional boolean, if not specified or *nil* the state
+             is only interrupted once, if *true* the state is interrupted
+             at every operation again, if *false* the state is no
+             longer interrupted.
 
 * **`state:close()`**
 
@@ -291,6 +305,10 @@ assert(thread:join())
 * **`mtstates.error.concurrent_access`**
 
   A state is accessed from two parallel running threads at the same time.
+
+* **`mtstates.error.interrupted`**
+
+  The state was interrupted by invoking the method *state:interrupt()*.
 
 * **`mtstates.error.invoking_state`**
 

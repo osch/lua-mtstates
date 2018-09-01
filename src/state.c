@@ -102,16 +102,21 @@ static const char* udataToLuaString(lua_State* L, StateUserData* udata)
 static int errormsghandler(lua_State* L)
 {
     const char* msg = lua_tostring(L, 1);
-    if (msg == NULL) {  /* is error object not a string? */
-        if (   luaL_callmeta(L, 1, "__tostring")  /* does it have a metamethod */
-            && lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
+    if (msg == NULL) {
+        if (luaL_testudata(L, 1, MTSTATES_ERROR_CLASS_NAME)) {
+            return 1;
+        }
+        else if (   luaL_callmeta(L, 1, "__tostring")  /* does it have a metamethod */
+                 && lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
+        {
             msg = lua_tostring(L, -1);  /* that is the message */
-        else
+        } else {
             msg = lua_pushfstring(L, "(error object is a %s value)",
-                                   luaL_typename(L, 1));
+                                     luaL_typename(L, 1));
+        }
     }
-    mtstates_push_ERROR_INVOKING_STATE(L, msg);
-    return 1;  /* return the traceback */
+    mtstates_push_ERROR(L, msg);
+    return 1;
 }
 
 static int dumpWriter(lua_State* L, const void* p, size_t sz, void* ud)
@@ -492,21 +497,53 @@ static int MtState_release(lua_State* L)
     return 0;
 }
 
+static void interruptHook1(lua_State* L2, lua_Debug* ar) 
+{
+  (void)ar;  /* unused arg. */
+  lua_sethook(L2, NULL, 0, 0);  /* reset hook */
+  mtstates_ERROR_INTERRUPTED(L2);
+}
+
+static void interruptHook2(lua_State* L2, lua_Debug* ar) 
+{
+  (void)ar;  /* unused arg. */
+  mtstates_ERROR_INTERRUPTED(L2);
+}
+
+static int MtState_interrupt(lua_State* L)
+{   
+    int arg = 1;
+    StateUserData* udata = luaL_checkudata(L, arg++, MTSTATES_STATE_CLASS_NAME);
+    MtState*       s     = udata->state;
+
+    lua_Hook hook = interruptHook1;
+    if (!lua_isnoneornil(L, arg)) {
+        if (!lua_isboolean(L, arg)) {
+            return luaL_argerror(L, arg, "boolean expected");
+        }
+        hook = lua_toboolean(L, arg) ? interruptHook2 : NULL;
+    }
+    if (hook) {
+        lua_sethook(s->L2, hook, LUA_MASKCALL|LUA_MASKRET|LUA_MASKCOUNT, 1);
+    } else {
+        lua_sethook(s->L2, NULL, 0, 0);  /* reset hook */
+    }
+    return 0;
+}
+
 static int MtState_close(lua_State* L)
 {
     StateUserData* udata = luaL_checkudata(L, 1, MTSTATES_STATE_CLASS_NAME);
     MtState*       s     = udata->state;
 
-    if (s) {
-        if (!async_lock_tryacquire(&s->stateLock)) {
-            return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
-        }
-        if (s->L2) {
-            lua_close(s->L2);
-            s->L2 = NULL;
-        }
-        async_lock_release(&s->stateLock);
+    if (!async_lock_tryacquire(&s->stateLock)) {
+        return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
     }
+    if (s->L2) {
+        lua_close(s->L2);
+        s->L2 = NULL;
+    }
+    async_lock_release(&s->stateLock);
     return 0;
 }
 
@@ -555,9 +592,15 @@ static int MtState_call(lua_State* L)
         async_lock_release(&s->stateLock);
         const char* stateString = mtstates_state_tostring(L, s);
         if (e) {
-            return mtstates_ERROR_INVOKING_STATE_traceback(L, stateString,
-                                                              lua_tostring(L, details),
-                                                              lua_tostring(L, traceback));
+            if (mtstates_is_ERROR_INTERRUPTED(e)) {
+                return mtstates_ERROR_INTERRUPTED_traceback(L, stateString,
+                                                               lua_tostring(L, details),
+                                                               lua_tostring(L, traceback));
+            } else {
+                return mtstates_ERROR_INVOKING_STATE_traceback(L, stateString,
+                                                                  lua_tostring(L, details),
+                                                                  lua_tostring(L, traceback));
+            }
         } else {
             return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L, details));
         }
@@ -615,6 +658,7 @@ static const luaL_Reg StateMethods[] =
     { "id",         MtState_id         },
     { "name",       MtState_name       },
     { "call",       MtState_call       },
+    { "interrupt",  MtState_interrupt  },
     { "close",      MtState_close      },
     { NULL,         NULL } /* sentinel */
 };

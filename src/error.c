@@ -7,6 +7,7 @@ static const char* const MTSTATES_ERROR_OBJECT_EXISTS     = "object_exists";
 static const char* const MTSTATES_ERROR_OBJECT_CLOSED     = "object_closed";
 static const char* const MTSTATES_ERROR_UNKNOWN_OBJECT    = "unknown_object";
 static const char* const MTSTATES_ERROR_INVOKING_STATE    = "invoking_state";
+static const char* const MTSTATES_ERROR_INTERRUPTED       = "interrupted";
 static const char* const MTSTATES_ERROR_STATE_RESULT      = "state_result";
 static const char* const MTSTATES_ERROR_OUT_OF_MEMORY     = "out_of_memory";
 
@@ -115,12 +116,44 @@ int mtstates_ERROR_UNKNOWN_OBJECT_state_id(lua_State* L, lua_Integer id)
     return throwErrorMessage(L, MTSTATES_ERROR_UNKNOWN_OBJECT);
 }
 
+bool mtstates_is_ERROR_INTERRUPTED(Error* e)
+{
+    return e && e->name && (strcmp(e->name, MTSTATES_ERROR_INTERRUPTED) == 0);
+}
 
-void mtstates_push_ERROR_INVOKING_STATE(lua_State* L, const char* errorDetails)
+
+int mtstates_ERROR_INTERRUPTED(lua_State* L)
+{
+    return throwError(L, MTSTATES_ERROR_INTERRUPTED);
+}
+
+int mtstates_ERROR_INTERRUPTED_traceback(lua_State* L, const char* stateString, const char* errorDetails, const char* traceback)
+{
+    int messageDetails = 0;
+    if (stateString != NULL) {
+        if (errorDetails != NULL) {
+            lua_pushfstring(L, "%s: %s", stateString, errorDetails);
+        } else {
+            lua_pushfstring(L, "%s", stateString);
+        }
+        messageDetails = lua_gettop(L);
+    } else if (errorDetails != NULL) {
+        lua_pushstring(L, errorDetails);
+        messageDetails = lua_gettop(L);
+    }
+    pushErrorMessage_traceback(L, MTSTATES_ERROR_INTERRUPTED, messageDetails, 0, traceback);
+    if (messageDetails) {
+        lua_remove(L, messageDetails);
+    }
+    return lua_error(L);
+}
+
+
+void mtstates_push_ERROR(lua_State* L, const char* errorDetails)
 {
     lua_pushstring(L, errorDetails);
     int messageDetails = lua_gettop(L);
-    pushErrorMessageLevel(L, MTSTATES_ERROR_INVOKING_STATE, messageDetails, 1);
+    pushErrorMessageLevel(L, NULL, messageDetails, 1);
     lua_remove(L, messageDetails);
 }
 
@@ -184,6 +217,23 @@ const char* mtstates_error_details(lua_State* L, Error* e)
         return NULL;
     }
 }
+
+const char* mtstates_error_name_and_details(lua_State* L, Error* e)
+{
+    if (e->details != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, e->details);
+        if (e->name) {
+            lua_pushfstring(L, "%s.%s: %s", MTSTATES_ERROR_CLASS_NAME, 
+                                            e->name, 
+                                            lua_tostring(L, -1));
+        }
+        return lua_tostring(L, -1);
+    } else {
+        lua_pushfstring(L, "%s.%s", MTSTATES_ERROR_CLASS_NAME, e->name);
+        return lua_tostring(L, -1);
+    }
+}
+
 
 const char* mtstates_error_traceback(lua_State* L, Error* e)
 {
@@ -333,6 +383,7 @@ int mtstates_error_init_module(lua_State* L, int errorModule)
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_EXISTS);
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_CLOSED);
     publishError(L, errorModule, MTSTATES_ERROR_UNKNOWN_OBJECT);
+    publishError(L, errorModule, MTSTATES_ERROR_INTERRUPTED);
     publishError(L, errorModule, MTSTATES_ERROR_INVOKING_STATE);
     publishError(L, errorModule, MTSTATES_ERROR_STATE_RESULT);
     publishError(L, errorModule, MTSTATES_ERROR_OUT_OF_MEMORY);
