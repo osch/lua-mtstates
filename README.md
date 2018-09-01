@@ -92,7 +92,7 @@ local thread = llthreads.new(function(threadInId, threadOutId)
                                  local threadIn  = mtmsg.buffer(threadInId)
                                  local threadOut = mtmsg.buffer(threadOutId)
                                  while true do
-                                     local cmd, stateId, arg = buffer:nextmsg()
+                                     local cmd, stateId, arg = threadIn:nextmsg()
                                      if cmd == "finish" then
                                          threadOut:addmsg("finished")
                                          break
@@ -114,7 +114,7 @@ assert(threadOut:nextmsg() == "done")
 
 assert("Hello World" == state:call("get"))
 
-threadIn:addmsg(state:id(), "finished")
+threadIn:addmsg("finish")
 assert(threadOut:nextmsg() == "finished")
 assert(thread:join())
 ```
@@ -335,7 +335,43 @@ assert(thread:join())
   created object is needed to keep it alive, i.e. if you want to pass an object
   to another thread via name or id, a reference to this object should be kept in the
   thread that created the object, until the receiving thread signaled that a reference
-  to the object has been constructed in the receiving thread.
+  to the object has been constructed in the receiving thread, example:
+
+  ```lua
+  local llthreads = require("llthreads2.ex")
+  local mtmsg     = require("mtmsg")
+  local mtstates  = require("mtstates")
+  local threadIn  = mtmsg.newbuffer()
+  local threadOut = mtmsg.newbuffer()
+  local state     = mtstates.newstate("return function() end")
+  local stateId   = state:id()
+  local thread    = llthreads.new(function(inId, outId, stateId)
+                                      local mtmsg     = require("mtmsg")
+                                      local mtstates  = require("mtstates")
+                                      local threadIn  = mtmsg.buffer(inId)
+                                      local threadOut = mtmsg.buffer(outId)
+                                      local state     = mtstates.state(stateId)
+                                      assert(state:id() == stateId)
+                                      threadOut:addmsg("started")
+                                      assert(threadIn:nextmsg() == "exit")
+                                      threadOut:addmsg("finished")
+                                  end,
+                                  threadIn:id(),
+                                  threadOut:id(),
+                                  stateId)
+  -- state = nil -- not now!
+  -- collectgarbage()
+  thread:start()
+  assert(threadOut:nextmsg() == "started")
+  state = nil -- now it's safe
+  collectgarbage()
+  threadIn:addmsg("exit")
+  assert(threadOut:nextmsg() == "finished")
+  assert(thread:join())
+  collectgarbage()
+  local _, err = pcall(function() mtstates.state(stateId) end)
+  assert(err == mtstates.error.unknown_object)
+  ```
   
 
 End of document.

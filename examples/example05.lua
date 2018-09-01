@@ -1,0 +1,33 @@
+  local llthreads = require("llthreads2.ex")
+  local mtmsg     = require("mtmsg")
+  local mtstates  = require("mtstates")
+  local threadIn  = mtmsg.newbuffer()
+  local threadOut = mtmsg.newbuffer()
+  local state     = mtstates.newstate("return function() end")
+  local stateId   = state:id()
+  local thread    = llthreads.new(function(inId, outId, stateId)
+                                      local mtmsg     = require("mtmsg")
+                                      local mtstates  = require("mtstates")
+                                      local threadIn  = mtmsg.buffer(inId)
+                                      local threadOut = mtmsg.buffer(outId)
+                                      local state     = mtstates.state(stateId)
+                                      assert(state:id() == stateId)
+                                      threadOut:addmsg("started")
+                                      assert(threadIn:nextmsg() == "exit")
+                                      threadOut:addmsg("finished")
+                                  end,
+                                  threadIn:id(),
+                                  threadOut:id(),
+                                  stateId)
+  -- state = nil -- not now!
+  -- collectgarbage()
+  thread:start()
+  assert(threadOut:nextmsg() == "started")
+  state = nil -- now it's safe
+  collectgarbage()
+  threadIn:addmsg("exit")
+  assert(threadOut:nextmsg() == "finished")
+  assert(thread:join())
+  collectgarbage()
+  local _, err = pcall(function() mtstates.state(stateId) end)
+  assert(err == mtstates.error.unknown_object)
