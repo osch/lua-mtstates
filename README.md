@@ -11,9 +11,10 @@ This package provides a way to create new Lua states from within Lua for using
 them in arbitrary threads. The implementation is independent from the
 underlying threading library (e.g. [Lanes] or [lua-llthreads2]).
 
-The general principle is to prepare a state that returns a callback function that can be
-called from different threads. This can be useful in a thread-pool scenario when the
-number of states exceeds the number of available threads.
+The general principle is to prepare a state by running a setup function within
+this state that returns a callback function which afterwards can be called from
+different threads. This can be useful in a thread-pool scenario when the number
+of states exceeds the number of available threads.
 
 This package is also available via LuaRocks, see https://luarocks.org/modules/osch/mtstates.
 
@@ -140,6 +141,7 @@ assert(thread:join())
        * error:message()
        * err1 == err2
    * [Errors](#errors)
+       * mtstates.error.concurrent_access
        * mtstates.error.invoking_state
        * mtstates.error.object_closed
        * mtstates.error.object_exists
@@ -153,7 +155,25 @@ assert(thread:join())
 
 * **`mtstates.newstate([name,][libs,]setup[,...)`**
 
-  TODO...
+  Creates a new state. The given setup function is executed in the new state. The
+  setup function must return a state callback function which can be called
+  using the method *state:call()*. Additional values that are returned from 
+  the setup function are given back as additional results by *mtstates.newstate()*.
+  
+    * *name*  - optional string, the name of the new state, can be *nil* or 
+                omitted to create a state without name. The name must be unique for
+                all states in the process.
+    * *libs*  - optional boolean, if *true* all standard libraries
+                are opened in the new state, if *false* only the basic lua functions 
+                and the module "package" are loaded, other standard libraries 
+                are preloaded and can be loaded by *require*, defaults to *true*,
+    * *setup* - state setup function, can be a function without upvalues or
+                a string containing lua code. The setup function must return
+                a function that is used as state callback function for the
+                new created state.
+    * *...*   - additional parameters, are transfered to the new state and
+                are given as arguments to the setup function. Arguments can be
+                simple data types (string, number, boolean, nil, light user data).
 
   Possible errors: *mtstates.error.object_exists*,
                    *mtstates.error.invoking_state*,
@@ -168,7 +188,7 @@ assert(thread:join())
            *state:id()*.
 
     * *name* - string, the optional name that was given when the
-               state was created with *mtstates.newstate()*
+               state was created with *mtstates.newstate()*.
 
   Possible errors: *mtstates.error.unknown_object*
 
@@ -203,9 +223,16 @@ assert(thread:join())
 
 * **`state:call(...)`**
 
-  TODO...
+  Invokes the state callback function that was returned by the state setup function
+  when the state was created with *mtstates.newstate()*.
+  
+  * *...* - All argument parameters are transfered to the state and given to the state
+            callback function. The result are transfered back to the invoking state. 
+            Arguments and results can be simple data types (string, number,
+            boolean, nil, light user data).
 
-  Possible errors: *mtstates.error.object_closed*,
+  Possible errors: *mtstates.error.concurrent_access*,
+                   *mtstates.error.object_closed*,
                    *mtstates.error.invoking_state*,
                    *mtstates.error.state_result*
 
@@ -216,6 +243,7 @@ assert(thread:join())
   referencing object raises a *mtstates.error.object_closed*. A closed state
   cannot be reactivated.
 
+  Possible errors: *mtstates.error.concurrent_access*
 
 <!-- ---------------------------------------------------------------------------------------- -->
 
@@ -260,9 +288,19 @@ assert(thread:join())
 
 ### Errors
 
+* **`mtstates.error.concurrent_access`**
+
+  A state is accessed from two parallel running threads at the same time.
+
 * **`mtstates.error.invoking_state`**
 
-  TODO....
+  An error ocurred when running code within another state, e.g. when the setup function
+  given to *mtstates.newstate()* is executed during state creation or when the
+  state callback function is called in *state:call()*.
+  
+  This error contains the traceback from within the state and the outer traceback from 
+  context that called *mtstates.newstate()* or *state:call()*.
+  
 
 * **`mtstates.error.object_closed`**
 
@@ -282,7 +320,10 @@ assert(thread:join())
 
 * **`mtstates.error.state_result`**
 
-  TODO....
+  A result value from a function invoked in another state is invalid, e.g. the
+  setup function given to *mtstates.newstate()* returns no state callback or
+  a state callback or state setup function returns a value that cannot be 
+  transferred back to the invoking state.
 
 * **`mtstates.error.unknown_object`**
 

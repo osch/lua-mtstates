@@ -175,6 +175,27 @@ static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, lua_
     return 0;
 }
 
+static const luaL_Reg mtstates_stdlibs[] =
+{
+#if LUA_VERSION_NUM > 501
+    { LUA_COLIBNAME,   luaopen_coroutine },
+#endif
+    { LUA_TABLIBNAME,  luaopen_table     },
+    { LUA_IOLIBNAME,   luaopen_io        },
+    { LUA_OSLIBNAME,   luaopen_os        },
+    { LUA_STRLIBNAME,  luaopen_string    },
+    { LUA_MATHLIBNAME, luaopen_math      },
+#if LUA_VERSION_NUM == 502
+    { LUA_BITLIBNAME,  luaopen_bit32     },
+#endif
+#if LUA_VERSION_NUM > 502
+    { LUA_UTF8LIBNAME, luaopen_utf8      },
+#endif
+    { LUA_DBLIBNAME,   luaopen_debug     },
+
+    { NULL, NULL}
+};
+
 static int Mtstates_newState(lua_State* L)
 {
     int nargs = lua_gettop(L);
@@ -264,6 +285,17 @@ static int Mtstates_newState(lua_State* L)
     }
     if (openlibs) {
         luaL_openlibs(L2);
+    } else {
+        luaL_requiref(L2, "_G", luaopen_base, true);
+        lua_pop(L2, 1);
+        luaL_requiref(L2, LUA_LOADLIBNAME, luaopen_package, true);
+            lua_getfield(L2, -1, "preload");
+                const luaL_Reg* r;
+                for (r = mtstates_stdlibs; r->func; ++r) {
+                    lua_pushcfunction(L2, r->func);
+                    lua_setfield(L2, -2, r->name);
+                }
+        lua_pop(L2, 2);
     }
     mtstates_error_init_meta(L2);
     
@@ -467,7 +499,7 @@ static int MtState_close(lua_State* L)
 
     if (s) {
         if (!async_lock_tryacquire(&s->stateLock)) {
-            return luaL_error(L, "state in use: %s", mtstates_state_tostring(L, s));
+            return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
         }
         if (s->L2) {
             lua_close(s->L2);
@@ -486,7 +518,7 @@ static int MtState_call(lua_State* L)
     MtState*       s     = udata->state;
 
     if (!async_lock_tryacquire(&s->stateLock)) {
-        return luaL_error(L, "state in use: %s", mtstates_state_tostring(L, s));
+        return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
     }
     if (s->L2 == NULL) {
         async_lock_release(&s->stateLock);

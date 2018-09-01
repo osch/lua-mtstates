@@ -2,6 +2,7 @@
 
 const char* const MTSTATES_ERROR_CLASS_NAME = "mtstates.error";
 
+static const char* const MTSTATES_ERROR_CONCURRENT_ACCESS = "concurrent_access";
 static const char* const MTSTATES_ERROR_OBJECT_EXISTS     = "object_exists";
 static const char* const MTSTATES_ERROR_OBJECT_CLOSED     = "object_closed";
 static const char* const MTSTATES_ERROR_UNKNOWN_OBJECT    = "unknown_object";
@@ -82,6 +83,12 @@ static int throwError(lua_State* L, const char* errorName)
 {
     pushErrorMessage(L, errorName, 0);
     return lua_error(L);
+}
+
+int mtstates_ERROR_CONCURRENT_ACCESS(lua_State* L, const char* objectString)
+{
+    lua_pushfstring(L, "%s", objectString);
+    return throwErrorMessage(L, MTSTATES_ERROR_CONCURRENT_ACCESS);
 }
 
 int mtstates_ERROR_OBJECT_EXISTS(lua_State* L, const char* objectString)
@@ -321,7 +328,8 @@ void mtstates_error_init_meta(lua_State* L)
 int mtstates_error_init_module(lua_State* L, int errorModule)
 {
     mtstates_error_init_meta(L);
-    
+
+    publishError(L, errorModule, MTSTATES_ERROR_CONCURRENT_ACCESS);    
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_EXISTS);
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_CLOSED);
     publishError(L, errorModule, MTSTATES_ERROR_UNKNOWN_OBJECT);

@@ -7,6 +7,7 @@ typedef struct Error Error;
 
 extern const char* const MTSTATES_ERROR_CLASS_NAME;
 
+int mtstates_ERROR_CONCURRENT_ACCESS(lua_State* L, const char* objectString);
 int mtstates_ERROR_OBJECT_EXISTS(lua_State* L, const char* objectString);
 int mtstates_ERROR_OBJECT_CLOSED(lua_State* L, const char* objectString);
 
