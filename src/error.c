@@ -3,8 +3,10 @@
 const char* const MTSTATES_ERROR_CLASS_NAME = "mtstates.error";
 
 static const char* const MTSTATES_ERROR_OBJECT_EXISTS     = "object_exists";
+static const char* const MTSTATES_ERROR_OBJECT_CLOSED     = "object_closed";
 static const char* const MTSTATES_ERROR_UNKNOWN_OBJECT    = "unknown_object";
 static const char* const MTSTATES_ERROR_INVOKING_STATE    = "invoking_state";
+static const char* const MTSTATES_ERROR_STATE_RESULT      = "state_result";
 static const char* const MTSTATES_ERROR_OUT_OF_MEMORY     = "out_of_memory";
 
 
@@ -37,7 +39,7 @@ static void pushErrorClass(lua_State* L, const char* name)
     lua_setmetatable(L, -2);
 }
 
-static void pushErrorMessage_traceback(lua_State* L, const char* name, int details, const char* traceback)
+static void pushErrorMessage_traceback(lua_State* L, const char* name, int details, int level, const char* traceback)
 {
     int top = lua_gettop(L);
     
@@ -51,15 +53,20 @@ static void pushErrorMessage_traceback(lua_State* L, const char* name, int detai
         e->details = LUA_NOREF;
     }
 
-    luaL_traceback(L, L, traceback, 0);
+    luaL_traceback(L, L, traceback, level);
     e->traceback = luaL_ref(L, LUA_REGISTRYINDEX);
     pushErrorMetatable(L);
     lua_setmetatable(L, -2);
 }
 
+static void pushErrorMessageLevel(lua_State* L, const char* name, int details, int level)
+{
+    pushErrorMessage_traceback(L, name, details, level, NULL);
+}
+
 static void pushErrorMessage(lua_State* L, const char* name, int details)
 {
-    pushErrorMessage_traceback(L, name, details, NULL);
+    pushErrorMessageLevel(L, name, details, 0);
 }
 
 /* error message details must be on top of stack */
@@ -83,6 +90,12 @@ int mtstates_ERROR_OBJECT_EXISTS(lua_State* L, const char* objectString)
     return throwErrorMessage(L, MTSTATES_ERROR_OBJECT_EXISTS);
 }
 
+int mtstates_ERROR_OBJECT_CLOSED(lua_State* L, const char* objectString)
+{
+    lua_pushfstring(L, "%s", objectString);
+    return throwErrorMessage(L, MTSTATES_ERROR_OBJECT_CLOSED);
+}
+
 int mtstates_ERROR_UNKNOWN_OBJECT_state_name(lua_State* L, const char* stateName, size_t nameLength)
 {
     mtstates_util_quote_lstring(L, stateName, nameLength);
@@ -96,6 +109,14 @@ int mtstates_ERROR_UNKNOWN_OBJECT_state_id(lua_State* L, lua_Integer id)
 }
 
 
+void mtstates_push_ERROR_INVOKING_STATE(lua_State* L, const char* errorDetails)
+{
+    lua_pushstring(L, errorDetails);
+    int messageDetails = lua_gettop(L);
+    pushErrorMessageLevel(L, MTSTATES_ERROR_INVOKING_STATE, messageDetails, 1);
+    lua_remove(L, messageDetails);
+}
+
 int mtstates_ERROR_INVOKING_STATE(lua_State* L, const char* stateString, const char* errorDetails)
 {
     if (stateString != NULL) {
@@ -106,14 +127,6 @@ int mtstates_ERROR_INVOKING_STATE(lua_State* L, const char* stateString, const c
     return throwErrorMessage(L, MTSTATES_ERROR_INVOKING_STATE);
 }
 
-void mtstates_push_ERROR_INVOKING_STATE(lua_State* L, const char* errorDetails)
-{
-    lua_pushstring(L, errorDetails);
-    int messageDetails = lua_gettop(L);
-    pushErrorMessage(L, MTSTATES_ERROR_INVOKING_STATE, messageDetails);
-    lua_remove(L, messageDetails);
-}
-
 int mtstates_ERROR_INVOKING_STATE_traceback(lua_State* L, const char* stateString, const char* errorDetails, const char* traceback)
 {
     if (stateString != NULL) {
@@ -122,10 +135,21 @@ int mtstates_ERROR_INVOKING_STATE_traceback(lua_State* L, const char* stateStrin
         lua_pushstring(L, errorDetails);
     }
     int messageDetails = lua_gettop(L);
-    pushErrorMessage_traceback(L, MTSTATES_ERROR_INVOKING_STATE, messageDetails, traceback);
+    pushErrorMessage_traceback(L, MTSTATES_ERROR_INVOKING_STATE, messageDetails, 0, traceback);
     lua_remove(L, messageDetails);
     return lua_error(L);
 }
+
+int mtstates_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails)
+{
+    if (stateString != NULL) {
+        lua_pushfstring(L, "%s: %s", stateString, errorDetails);
+    } else {
+        lua_pushstring(L, errorDetails);
+    }
+    return throwErrorMessage(L, MTSTATES_ERROR_STATE_RESULT);
+}
+
 
 
 int mtstates_ERROR_OUT_OF_MEMORY(lua_State* L)
@@ -299,8 +323,10 @@ int mtstates_error_init_module(lua_State* L, int errorModule)
     mtstates_error_init_meta(L);
     
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_EXISTS);
+    publishError(L, errorModule, MTSTATES_ERROR_OBJECT_CLOSED);
     publishError(L, errorModule, MTSTATES_ERROR_UNKNOWN_OBJECT);
     publishError(L, errorModule, MTSTATES_ERROR_INVOKING_STATE);
+    publishError(L, errorModule, MTSTATES_ERROR_STATE_RESULT);
     publishError(L, errorModule, MTSTATES_ERROR_OUT_OF_MEMORY);
     
     return 0;

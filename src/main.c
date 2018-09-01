@@ -12,24 +12,25 @@
 
 const char* const MTSTATES_MODULE_NAME = "mtstates";
 
-static AtomicPtr atomic_lock_holder = 0;
-static bool      initialized        = false;
-static int       initCounter        = 0;
+static Mutex         global_mutex;
+static AtomicCounter initStage          = 0;
+static bool          initialized        = false;
+static int           stateCounter       = 0;
 
 Mutex*        mtstates_global_lock = NULL;
 AtomicCounter mtstates_id_counter  = 0;
 
-static int internalError(lua_State* L, const char* text, int line) 
+/*static int internalError(lua_State* L, const char* text, int line) 
 {
     return luaL_error(L, "Internal error: %s (%s:%d)", text, MTSTATES_MODULE_NAME, line);
-}
+}*/
 
 
 static int handleClosingLuaState(lua_State* L)
 {
     async_mutex_lock(mtstates_global_lock);
-    initCounter -= 1;
-    if (initCounter == 0) {
+    stateCounter -= 1;
+    if (stateCounter == 0) {
 
     }
     async_mutex_unlock(mtstates_global_lock);
@@ -70,24 +71,27 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
 
     /* ---------------------------------------- */
 
-    if (atomic_get_ptr(&atomic_lock_holder) == NULL) {
-        Mutex* newLock = malloc(sizeof(Mutex));
-        if (!newLock) {
-            return internalError(L, "initialize lock failed", __LINE__);
-        }
-        async_mutex_init(newLock);
-
-        if (!atomic_set_ptr_if_equal(&atomic_lock_holder, NULL, newLock)) {
-            async_mutex_destruct(newLock);
-            free(newLock);
+    if (atomic_get(&initStage) != 2) {
+        if (atomic_set_if_equal(&initStage, 0, 1)) {
+            async_mutex_init(&global_mutex);
+            mtstates_global_lock = &global_mutex;
+            atomic_set(&initStage, 2);
+        } 
+        else {
+            while (atomic_get(&initStage) != 2) {
+                Mutex waitMutex;
+                async_mutex_init(&waitMutex);
+                async_mutex_lock(&waitMutex);
+                async_mutex_wait_millis(&waitMutex, 1);
+                async_mutex_destruct(&waitMutex);
+            }
         }
     }
     /* ---------------------------------------- */
 
-    async_mutex_lock(atomic_get_ptr(&atomic_lock_holder));
+    async_mutex_lock(mtstates_global_lock);
     {
         if (!initialized) {
-            mtstates_global_lock = atomic_get_ptr(&atomic_lock_holder);
             /* create initial id that could not accidently be mistaken with "normal" integers */
             const char* ptr = MTSTATES_MODULE_NAME;
             AtomicCounter c = 0;
@@ -114,7 +118,7 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
         
         if (!alreadyInitializedForThisLua) 
         {
-            initCounter += 1;
+            stateCounter += 1;
             
             lua_pushlightuserdata(L, (void*)&initialized); /* unique void* key */
                 lua_newuserdata(L, 1); /* sentinel for closing lua state */
@@ -144,6 +148,25 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
     
     lua_pushliteral(L, MTSTATES_VERSION_STRING);
     lua_setfield(L, module, "_VERSION");
+    
+    {
+    #if defined(MTSTATES_ASYNC_USE_WIN32)
+        #define MTSTATES_INFO1 "WIN32"
+    #elif defined(MTSTATES_ASYNC_USE_GNU)
+        #define MTSTATES_INFO1 "GNU"
+    #elif defined(MTSTATES_ASYNC_USE_STDATOMIC)
+        #define MTSTATES_INFO1 "STD"
+    #endif
+    #if defined(MTSTATES_ASYNC_USE_WINTHREAD)
+        #define MTSTATES_INFO2 "WIN32"
+    #elif defined(MTSTATES_ASYNC_USE_PTHREAD)
+        #define MTSTATES_INFO2 "PTHREAD"
+    #elif defined(MTSTATES_ASYNC_USE_STDTHREAD)
+        #define MTSTATES_INFO2 "STD"
+    #endif
+        lua_pushstring(L, "atomic:" MTSTATES_INFO1 ",thread:" MTSTATES_INFO2);
+        lua_setfield(L, module, "_INFO");
+    }
     
     lua_pushvalue(L, stateClass);
     lua_setfield (L, stateMeta, "__index");

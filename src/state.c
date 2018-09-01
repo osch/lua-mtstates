@@ -7,6 +7,7 @@ const char* const MTSTATES_STATE_CLASS_NAME = "mtstates.state";
 typedef struct MtState {
     lua_Integer        id;
     AtomicCounter      used;
+    AtomicCounter      initialized;
     char*              stateName;
     size_t             stateNameLength;
     Lock               stateLock;
@@ -104,7 +105,7 @@ static int errormsghandler(lua_State* L)
     if (msg == NULL) {  /* is error object not a string? */
         if (   luaL_callmeta(L, 1, "__tostring")  /* does it have a metamethod */
             && lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
-            return 1;  /* that is the message */
+            msg = lua_tostring(L, -1);  /* that is the message */
         else
             msg = lua_pushfstring(L, "(error object is a %s value)",
                                    luaL_typename(L, 1));
@@ -124,7 +125,8 @@ static int dumpWriter(lua_State* L, const void* p, size_t sz, void* ud)
 
 static int pushArg(lua_State* L2, lua_State* L, int arg, lua_State* errorL)
 {
-    switch (lua_type(L, arg)) {
+    int tp = lua_type(L, arg);
+    switch (tp) {
         case LUA_TNIL: {
             lua_pushnil(L2);
             break;
@@ -151,8 +153,8 @@ static int pushArg(lua_State* L2, lua_State* L, int arg, lua_State* errorL)
             lua_pushlightuserdata(L2, lua_touserdata(L, arg));
             break;
         }
-        default: { /* TODO: support more types */
-            lua_pushstring(errorL, "parameter type not supported");
+        default: {
+            lua_pushfstring(errorL, "type '%s' not supported", lua_typename(L, tp));
             return arg;
         }
     }
@@ -197,7 +199,7 @@ static int Mtstates_newState(lua_State* L)
     size_t      stateCodeLength;
     const char* stateCode = NULL;
     if (arg <= nargs && lua_type(L, arg) == LUA_TSTRING) {
-        stateCode = lua_tolstring(L, arg++, &stateCodeLength);
+        stateCode = lua_tolstring(L, arg, &stateCodeLength);
     }
     
     int stateFunction = 0;
@@ -274,6 +276,19 @@ static int Mtstates_newState(lua_State* L)
             lua_pushcfunction(L2, lua_tocfunction(L, stateFunction));
             rc = LUA_OK;
         } else {
+            const char* varname = lua_getupvalue(L, stateFunction, 1);
+            if (varname) {
+                if (strcmp(varname, "_ENV") == 0) {
+                    /* _ENV -> function usese global variables */
+                    lua_pop(L, 1); /* pop result from first lua_getupvalue */
+                    varname = lua_getupvalue(L, stateFunction, 2);
+                }
+                if (varname) {
+                    lua_pushfstring(L, "state function uses upvalue '%s'", varname);
+                    async_lock_release(&s->stateLock);
+                    return luaL_argerror(L, stateFunction, lua_tostring(L, -1));
+                }
+            }
             MemBuffer tmp;
             mtstates_membuf_init(&tmp, 4 * 1024, 2);
             lua_pushvalue(L, stateFunction);
@@ -332,20 +347,23 @@ static int Mtstates_newState(lua_State* L)
         if (rc != 0) {
             lua_close(L2);
             async_lock_release(&s->stateLock);
-            return luaL_error(L, "bad result arg %d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+            lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+            return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
         }
     }
-    s->L2 = L2;
-    if (nrslts >= 1) {
-        lua_pushvalue(L2, firstrslt);
-        s->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
-    } else {
-        ++nrslts; /* interpret first rslt as nil */
-        s->callbackref = LUA_REFNIL;
+    if (nrslts < 1 || lua_type(L2, firstrslt) != LUA_TFUNCTION) {
+        const char* t = (nrslts < 1) ? "nothing" : lua_typename(L2, lua_type(L2, firstrslt));
+        lua_pushfstring(L, "state setup returns %s but a function is required as first result parameter", t);
+        lua_close(L2);
+        async_lock_release(&s->stateLock);
+        return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
     }
+    s->L2 = L2;
+    lua_pushvalue(L2, firstrslt);
+    s->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
     
     /* ------------------------------------------------------------------------------------ */
-
+    atomic_set(&s->initialized, true);
     async_lock_release(&s->stateLock);
     
     return nrslts - 1 + 1;
@@ -385,13 +403,13 @@ static int Mtstates_state(lua_State* L)
     MtState* state;
     if (stateName != NULL) {
         state = findStateWithName(stateName, stateNameLength);
-        if (!state) {
+        if (!state || !atomic_get(&state->initialized)) {
             async_mutex_unlock(mtstates_global_lock);
             return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
         }
     } else {
         state = findStateWithId(stateId);
-        if (!state) {
+        if (!state || !atomic_get(&state->initialized)) {
             async_mutex_unlock(mtstates_global_lock);
             return mtstates_ERROR_UNKNOWN_OBJECT_state_id(L, stateId);
         }
@@ -442,6 +460,24 @@ static int MtState_release(lua_State* L)
     return 0;
 }
 
+static int MtState_close(lua_State* L)
+{
+    StateUserData* udata = luaL_checkudata(L, 1, MTSTATES_STATE_CLASS_NAME);
+    MtState*       s     = udata->state;
+
+    if (s) {
+        if (!async_lock_tryacquire(&s->stateLock)) {
+            return luaL_error(L, "state in use: %s", mtstates_state_tostring(L, s));
+        }
+        if (s->L2) {
+            lua_close(s->L2);
+            s->L2 = NULL;
+        }
+        async_lock_release(&s->stateLock);
+    }
+    return 0;
+}
+
 static int MtState_call(lua_State* L)
 {
     int lastarg = lua_gettop(L);
@@ -452,16 +488,16 @@ static int MtState_call(lua_State* L)
     if (!async_lock_tryacquire(&s->stateLock)) {
         return luaL_error(L, "state in use: %s", mtstates_state_tostring(L, s));
     }
-    if (!s->L2) {
+    if (s->L2 == NULL) {
         async_lock_release(&s->stateLock);
-        return luaL_error(L, "invalid state: %s", mtstates_state_tostring(L, s));
+        return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
     }
     lua_State* L2 = s->L2;
     int l2start = lua_gettop(L2);
     int l2top = l2start;
     lua_pushcfunction(L2, errormsghandler);
     int msghandler = ++l2top;
-    lua_rawgeti(s->L2, LUA_REGISTRYINDEX, s->callbackref);
+    lua_rawgeti(L2, LUA_REGISTRYINDEX, s->callbackref);
     int func = ++l2top;
     int rc = pushArgs(L2, L, arg, lastarg, L);
     if (rc != 0) {
@@ -501,7 +537,8 @@ static int MtState_call(lua_State* L)
     if (rc != 0) {
         lua_settop(L2, l2start);
         async_lock_release(&s->stateLock);
-        return luaL_error(L, "bad result arg %d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+        lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
+        return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
     }
     lua_settop(L2, l2start);
     async_lock_release(&s->stateLock);
@@ -546,6 +583,7 @@ static const luaL_Reg StateMethods[] =
     { "id",         MtState_id         },
     { "name",       MtState_name       },
     { "call",       MtState_call       },
+    { "close",      MtState_close      },
     { NULL,         NULL } /* sentinel */
 };
 

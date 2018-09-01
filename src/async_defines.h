@@ -27,10 +27,10 @@
 
     #if defined(WIN32) || defined(_WIN32)
         #define MTSTATES_ASYNC_USE_WIN32
-    #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-        #define MTSTATES_ASYNC_USE_STDATOMIC
     #elif defined(__GNUC__)
         #define MTSTATES_ASYNC_USE_GNU
+    #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+        #define MTSTATES_ASYNC_USE_STDATOMIC
     #else
         #error "MTSTATES_ASYNC: unknown platform"
     #endif
@@ -38,12 +38,18 @@
 
 /* -------------------------------------------------------------------------------------------- */
 
+#if defined(__unix__) || defined(__unix) || (defined (__APPLE__) && defined (__MACH__))
+    #include <unistd.h>
+#endif
+
 #if    !defined(MTSTATES_ASYNC_USE_WINTHREAD) \
     && !defined(MTSTATES_ASYNC_USE_PTHREAD) \
     && !defined(MTSTATES_ASYNC_USE_STDTHREAD)
     
     #ifdef MTSTATES_ASYNC_USE_WIN32
         #define MTSTATES_ASYNC_USE_WINTHREAD
+    #elif _XOPEN_VERSION >= 600
+        #define MTSTATES_ASYNC_USE_PTHREAD
     #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
         #define MTSTATES_ASYNC_USE_STDTHREAD
     #else

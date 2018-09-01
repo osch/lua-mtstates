@@ -21,13 +21,18 @@ This package is also available via LuaRocks, see https://luarocks.org/modules/os
 [Lanes]:             https://luarocks.org/modules/benoitgermain/lanes
 [lua-llthreads2]:    https://luarocks.org/modules/moteus/lua-llthreads2
 
+See below for full [reference documentation](#documentation).
+
 <!-- ---------------------------------------------------------------------------------------- -->
 
 ## Examples
 
-Simple example: a state is constructed whose callback function is called from a
+For the examples [llthreads2](https://luarocks.org/modules/moteus/lua-llthreads2)
+is used as low level multi-threading implementation.
+
+First example: a state is constructed whose callback function is called from a
 parallel thread and from the main thread. The state is passed by integer id to the
-created thread.
+created thread. 
 
 ```lua
 local llthreads = require("llthreads2.ex")
@@ -117,7 +122,181 @@ assert(thread:join())
 
 <!-- ---------------------------------------------------------------------------------------- -->
 
-## Todo
+## Documentation
 
-more to come....
+   * [Module Functions](#module-functions)
+       * mtstates.newstate()
+       * mtstates.state()
+       * mtstates.type()
+   * [State Methods](#state-methods)
+       * state:id()
+       * state:name()
+       * state:call()
+       * state:close()
+   * [Error Methods](#error-methods)
+       * error:name()
+       * error:details()
+       * error:traceback()
+       * error:message()
+       * err1 == err2
+   * [Errors](#errors)
+       * mtstates.error.invoking_state
+       * mtstates.error.object_closed
+       * mtstates.error.object_exists
+       * mtstates.error.out_of_memory
+       * mtstates.error.state_result
+       * mtstates.error.unknown_object
 
+<!-- ---------------------------------------------------------------------------------------- -->
+
+### Module Functions
+
+* **`mtstates.newstate([name,][libs,]setup[,...)`**
+
+  TODO...
+
+  Possible errors: *mtstates.error.object_exists*,
+                   *mtstates.error.invoking_state*,
+                   *mtstates.error.state_result*
+
+* **`mtstates.state(id|name)`**
+
+  Creates a lua object for referencing an existing state. The state must
+  be referenced by its *id* or *name*.
+
+    * *id* - integer, the unique state id that can be obtained by
+           *state:id()*.
+
+    * *name* - string, the optional name that was given when the
+               state was created with *mtstates.newstate()*
+
+  Possible errors: *mtstates.error.unknown_object*
+
+
+* **`mtstates.type(arg)`**
+
+  Returns the type of *arg* as string. Same as *type(arg)* for builtin types.
+  For *userdata* objects it tries to determine the type from the *__name* field in 
+  the metatable and checks if the metatable can be found in the lua registry for this key
+  as created by [luaL_newmetatable](https://www.lua.org/manual/5.3/manual.html#luaL_newmetatable).
+
+  Returns *"userdata"* for userdata where the *__name* field in the metatable is missing
+  or does not have a corresponding entry in the lua registry.
+  
+  Returns *"mtstates.state"*, or *"mtstates.error"* if the arg is one
+  of the userdata types provided by the mtstates package.
+
+
+<!-- ---------------------------------------------------------------------------------------- -->
+
+### State Methods
+
+* **`state:id()`**
+  
+  Returns the state's id as integer. This id is unique among all states 
+  for the whole process.
+
+* **`state:name()`**
+
+  Returns the state's name that was given to *mtstates.newstate()*.
+  
+
+* **`state:call(...)`**
+
+  TODO...
+
+  Possible errors: *mtstates.error.object_closed*,
+                   *mtstates.error.invoking_state*,
+                   *mtstates.error.state_result*
+
+
+* **`state:close()`**
+
+  Closes the underlying state and frees the memory. Every operation from any
+  referencing object raises a *mtstates.error.object_closed*. A closed state
+  cannot be reactivated.
+
+
+<!-- ---------------------------------------------------------------------------------------- -->
+
+### Error Methods
+
+* **`error:name()`**
+
+  Name of the error as string, example:
+  
+  ```lua
+  local mtstates = require("mtstates")
+  assert(mtstates.error.object_closed:name() == "mtstates.error.object_closed")
+  ```
+  
+* **`error:details()`**
+
+  Additional details as string regarding this error.
+
+* **`error:traceback()`**
+
+  Stacktrace as string where the error occured.
+
+* **`error:message()`**
+
+  Full message as string containing name, details and traceback.
+  Same as *tostring(error)*.
+  
+* **`err1 == err2`**
+  
+  Two errors are considered equal if they have the same name. This can be used
+  for error evaluation, example:
+
+  ```lua
+  local mtstates = require("mtstates")
+  local _, err = pcall(function() 
+      mtstates.newstate(function() end) 
+  end)
+  assert(err == mtstates.error.state_result)
+  ```
+
+<!-- ---------------------------------------------------------------------------------------- -->
+
+### Errors
+
+* **`mtstates.error.invoking_state`**
+
+  TODO....
+
+* **`mtstates.error.object_closed`**
+
+  An operation is performed on a closed state, i.e. the method
+  *state:close()* has been called.
+
+* **`mtstates.error.object_exists`**
+
+  A new state is to be created via *mtstates.newstate()*
+  with a name that refers to an already existing state.
+
+
+* **`mtstates.error.out_of_memory`**
+
+  State memory cannot be allocated.
+
+
+* **`mtstates.error.state_result`**
+
+  TODO....
+
+* **`mtstates.error.unknown_object`**
+
+  A reference to an existing state (via *mtstates.state()*)
+  cannot be created because the object cannot be found by
+  the given id or name. 
+  
+  All mtstates objects are subject to garbage collection and therefore a reference to a 
+  created object is needed to keep it alive, i.e. if you want to pass an object
+  to another thread via name or id, a reference to this object should be kept in the
+  thread that created the object, until the receiving thread signaled that a reference
+  to the object has been constructed in the receiving thread.
+  
+
+End of document.
+
+<!-- ---------------------------------------------------------------------------------------- -->
