@@ -332,6 +332,7 @@ static int Mtstates_newState(lua_State* L)
         }
     }
     toBuckets(s, state_buckets, state_bucket_list);
+    atomic_inc(&state_counter);
     
     async_lock_acquire(&s->stateLock);
 
@@ -379,6 +380,7 @@ static int Mtstates_newState(lua_State* L)
                 if (varname) {
                     lua_pushfstring(L, "state function uses upvalue '%s'", varname);
                     async_lock_release(&s->stateLock);
+                    lua_close(L2);
                     return luaL_argerror(L, stateFunction, lua_tostring(L, -1));
                 }
             }
@@ -397,15 +399,15 @@ static int Mtstates_newState(lua_State* L)
         size_t errorMessageLength;
         const char* errorMessage = luaL_tolstring(L2, -1, &errorMessageLength);
         lua_pushlstring(L, errorMessage, errorMessageLength);
-        lua_close(L2);
         async_lock_release(&s->stateLock);
+        lua_close(L2);
         return lua_error(L);
     }
     int func = ++l2top;
     rc = pushArgs(L2, L, arg, nargs, L);
     if (rc != 0) {
-        lua_close(L2);
         async_lock_release(&s->stateLock);
+        lua_close(L2);
         return luaL_argerror(L, rc, lua_tostring(L, -1));
     }
     rc = lua_pcall(L2, nargs - arg + 1, LUA_MULTRET, msghandler);
@@ -422,8 +424,8 @@ static int Mtstates_newState(lua_State* L)
             const char* errorString = luaL_tolstring(L2, -1, &errorMessageLength);
             lua_pushlstring(L, errorString, errorMessageLength); details = ++ltop;
         }
-        lua_close(L2);
         async_lock_release(&s->stateLock);
+        lua_close(L2);
         if (e) {
             return mtstates_ERROR_INVOKING_STATE_traceback(L, NULL,
                                                               lua_tostring(L, details),
@@ -438,8 +440,8 @@ static int Mtstates_newState(lua_State* L)
     if (nrslts >= 2) {
         rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L);
         if (rc != 0) {
-            lua_close(L2);
             async_lock_release(&s->stateLock);
+            lua_close(L2);
             lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
             return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
         }
@@ -447,8 +449,8 @@ static int Mtstates_newState(lua_State* L)
     if (nrslts < 1 || lua_type(L2, firstrslt) != LUA_TFUNCTION) {
         const char* t = (nrslts < 1) ? "nothing" : lua_typename(L2, lua_type(L2, firstrslt));
         lua_pushfstring(L, "state setup returns %s but a function is required as first result parameter", t);
-        lua_close(L2);
         async_lock_release(&s->stateLock);
+        lua_close(L2);
         return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
     }
     s->L2 = L2;
@@ -457,7 +459,6 @@ static int Mtstates_newState(lua_State* L)
     
     /* ------------------------------------------------------------------------------------ */
     atomic_set(&s->initialized, true);
-    atomic_inc(&state_counter);
     async_lock_release(&s->stateLock);
     
     return nrslts - 1 + 1;
@@ -523,7 +524,9 @@ static int Mtstates_state(lua_State* L)
 
 static void MtState_free(MtState* s)
 {
-    if (s->prevStatePtr) {
+    bool wasInBucket = (s->prevStatePtr != NULL);
+    
+    if (wasInBucket) {
         *s->prevStatePtr = s->nextState;
     }
     if (s->nextState) {
@@ -539,21 +542,23 @@ static void MtState_free(MtState* s)
     async_lock_destruct(&s->stateLock);
     free(s);
     
-    int c = atomic_dec(&state_counter);
-    if (c == 0) {
-        if (state_bucket_list)  {
-            free(state_bucket_list);
+    if (wasInBucket) {
+        int c = atomic_dec(&state_counter);
+        if (c == 0) {
+            if (state_bucket_list)  {
+                free(state_bucket_list);
+            }
+            state_buckets     = 0;
+            state_bucket_list = NULL;
+            bucket_usage      = 0;
         }
-        state_buckets     = 0;
-        state_bucket_list = NULL;
-        bucket_usage      = 0;
-    }
-    else if (c * 10 < state_buckets) {
-        lua_Integer n = 2 * c;
-        if (n > 64) {
-            StateBucket* newList = calloc(n, sizeof(StateBucket));
-            if (newList) {
-                newBuckets(n, newList);
+        else if (c * 10 < state_buckets) {
+            lua_Integer n = 2 * c;
+            if (n > 64) {
+                StateBucket* newList = calloc(n, sizeof(StateBucket));
+                if (newList) {
+                    newBuckets(n, newList);
+                }
             }
         }
     }
