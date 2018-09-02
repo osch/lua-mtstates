@@ -194,7 +194,9 @@ assert(thread:join())
 * **`mtstates.state(id|name)`**
 
   Creates a lua object for referencing an existing state. The state must
-  be referenced by its *id* or *name*.
+  be referenced by its *id* or *name*. Referencing the state by *id* is
+  much faster than referencing by *name* if the number of states 
+  increases.
 
     * *id* - integer, the unique state id that can be obtained by
            *state:id()*.

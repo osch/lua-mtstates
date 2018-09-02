@@ -19,24 +19,72 @@ typedef struct MtState {
     
 } MtState;
 
+typedef struct {
+    int      count;
+    MtState* firstState;
+} StateBucket;
+
+static int           state_counter     = 0;
+static int           state_buckets     = 0;
+static int           bucket_usage      = 0;
+static StateBucket*  state_bucket_list = NULL;
+
 typedef struct StateUserData {
     MtState*         state;
 } StateUserData;
 
-static MtState* firstState = NULL;
+inline static void toBuckets(MtState* s, int n, StateBucket* list)
+{
+    StateBucket* bucket        = &(list[s->id % n]);
+    MtState**    firstStatePtr = &bucket->firstState;
+    if (*firstStatePtr) {
+        (*firstStatePtr)->prevStatePtr = &s->nextState;
+    }
+    s->nextState    = *firstStatePtr;
+    s->prevStatePtr =  firstStatePtr;
+    *firstStatePtr  =  s;
+    bucket->count += 1;
+    if (bucket->count > bucket_usage) {
+        bucket_usage = bucket->count;
+    }
+}
+
+static void newBuckets(int n, StateBucket* newList)
+{
+    if (state_bucket_list) {
+        bucket_usage = 0;
+        int i;
+        for (i = 0; i < state_buckets; ++i) {
+            StateBucket* b = &(state_bucket_list[i]);
+            MtState*     s = b->firstState;
+            while (s != NULL) {
+                MtState* s2 = s->nextState;
+                toBuckets(s, n, newList);
+                s = s2;
+            }
+        }
+        free(state_bucket_list);
+    }
+    state_buckets     = n;
+    state_bucket_list = newList;
+}
 
 static MtState* findStateWithName(const char* stateName, size_t stateNameLength)
 {
-    if (stateName) {
-        MtState* s = firstState;
-        while (s != NULL) {
-            if (   s->stateName 
-                && stateNameLength == s->stateNameLength 
-                && memcmp(s->stateName, stateName, stateNameLength) == 0)
-            {
-                return s;
+    if (stateName && state_bucket_list) {
+        int i;
+        for (i = 0; i < state_buckets; ++i) {
+            StateBucket* b = &(state_bucket_list[i]);
+            MtState*     s = b->firstState;
+            while (s != NULL) {
+                if (   s->stateName 
+                    && stateNameLength == s->stateNameLength 
+                    && memcmp(s->stateName, stateName, stateNameLength) == 0)
+                {
+                    return s;
+                }
+                s = s->nextState;
             }
-            s = s->nextState;
         }
     }
     return NULL;
@@ -44,12 +92,14 @@ static MtState* findStateWithName(const char* stateName, size_t stateNameLength)
 
 static MtState* findStateWithId(lua_Integer stateId)
 {
-    MtState* s = firstState;
-    while (s != NULL) {
-        if (s->id == stateId) {
-            return s;
+    if (state_bucket_list) {
+        MtState* s = state_bucket_list[stateId % state_buckets].firstState;
+        while (s != NULL) {
+            if (s->id == stateId) {
+                return s;
+            }
+            s = s->nextState;
         }
-        s = s->nextState;
     }
     return NULL;
 }
@@ -249,12 +299,11 @@ static int Mtstates_newState(lua_State* L)
     
     /* ------------------------------------------------------------------------------------ */
 
-    MtState* s = malloc(sizeof(MtState));
+    MtState* s = calloc(1, sizeof(MtState));
     if (s == NULL) {
         async_mutex_unlock(mtstates_global_lock);
         return mtstates_ERROR_OUT_OF_MEMORY(L);
     }
-    memset(s, 0, sizeof(MtState));
     async_lock_init(&s->stateLock);
     
     s->id        = atomic_inc(&mtstates_id_counter);
@@ -270,13 +319,18 @@ static int Mtstates_newState(lua_State* L)
         memcpy(s->stateName, stateName, stateNameLength + 1);
         s->stateNameLength = stateNameLength;
     }
-    if (firstState) {
-        firstState->prevStatePtr = &s->nextState;
+    if (state_counter + 1 > state_buckets * 4 || bucket_usage > 30) {
+        int n = state_buckets ? (2 * state_buckets) : 64;
+        StateBucket* newList = calloc(n, sizeof(StateBucket));
+        if (newList) {
+            newBuckets(n, newList);
+        } else if (!state_buckets) {
+            async_mutex_unlock(mtstates_global_lock);
+            return mtstates_ERROR_OUT_OF_MEMORY(L);
+        }
     }
-    s->nextState    = firstState;
-    s->prevStatePtr = &firstState;
-    firstState      = s;
-
+    toBuckets(s, state_buckets, state_bucket_list);
+    
     async_lock_acquire(&s->stateLock);
 
     async_mutex_unlock(mtstates_global_lock);
@@ -401,6 +455,7 @@ static int Mtstates_newState(lua_State* L)
     
     /* ------------------------------------------------------------------------------------ */
     atomic_set(&s->initialized, true);
+    state_counter += 1;
     async_lock_release(&s->stateLock);
     
     return nrslts - 1 + 1;
@@ -477,6 +532,22 @@ static void MtState_free(MtState* s)
     }
     async_lock_destruct(&s->stateLock);
     free(s);
+    state_counter -= 1;
+    if (state_counter == 0) {
+        state_buckets = 0;
+        free(state_bucket_list);
+        state_bucket_list = NULL;
+        bucket_usage      = 0;
+    }
+    else if (state_counter * 10 < state_buckets) {
+        int n = 2 * state_counter;
+        if (n > 64) {
+            StateBucket* newList = calloc(n, sizeof(StateBucket));
+            if (newList) {
+                newBuckets(n, newList);
+            }
+        }
+    }
 }
 
 static int MtState_release(lua_State* L)
