@@ -40,13 +40,6 @@ do
     assert(threadOut:nextmsg() == "started")
     mtmsg.sleep(0.2)
     
-    local _, err = pcall (function() mtstates.newstate("foo", function() end) end)
-    print("-------------------------------------")
-    print("-- Expected error:")
-    print(err)
-    print("-------------------------------------")
-    assert(err == mtstates.error.object_exists)
-    
     local _, err = pcall(function() mtstates.state("foo") end)
     print("-------------------------------------")
     print("-- Expected error:")
@@ -60,9 +53,24 @@ do
     print(err)
     print("-------------------------------------")
     assert(err == mtstates.error.unknown_object)
-    
+
+    local s2 = mtstates.newstate("foo", "return function() end")
+    assert(s2:name() == "foo")
+    assert(mtstates.state("foo"):id() == s2:id())
+
     threadIn:addmsg("stop")
     assert(threadOut:nextmsg() == "created")
+
+    local _, err = pcall(function() mtstates.state("foo") end)
+    print("-------------------------------------")
+    print("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(err == mtstates.error.ambiguous_name)
+    
+    s2 = nil
+    collectgarbage()
+
     local s = mtstates.state("foo")
     threadIn:addmsg("stop")
     assert(s:call() == "ok")

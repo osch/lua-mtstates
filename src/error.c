@@ -2,8 +2,8 @@
 
 const char* const MTSTATES_ERROR_CLASS_NAME = "mtstates.error";
 
+static const char* const MTSTATES_ERROR_AMBIGUOUS_NAME    = "ambiguous_name";
 static const char* const MTSTATES_ERROR_CONCURRENT_ACCESS = "concurrent_access";
-static const char* const MTSTATES_ERROR_OBJECT_EXISTS     = "object_exists";
 static const char* const MTSTATES_ERROR_OBJECT_CLOSED     = "object_closed";
 static const char* const MTSTATES_ERROR_UNKNOWN_OBJECT    = "unknown_object";
 static const char* const MTSTATES_ERROR_INVOKING_STATE    = "invoking_state";
@@ -92,12 +92,6 @@ int mtstates_ERROR_CONCURRENT_ACCESS(lua_State* L, const char* objectString)
     return throwErrorMessage(L, MTSTATES_ERROR_CONCURRENT_ACCESS);
 }
 
-int mtstates_ERROR_OBJECT_EXISTS(lua_State* L, const char* objectString)
-{
-    lua_pushfstring(L, "%s", objectString);
-    return throwErrorMessage(L, MTSTATES_ERROR_OBJECT_EXISTS);
-}
-
 int mtstates_ERROR_OBJECT_CLOSED(lua_State* L, const char* objectString)
 {
     lua_pushfstring(L, "%s", objectString);
@@ -114,6 +108,12 @@ int mtstates_ERROR_UNKNOWN_OBJECT_state_id(lua_State* L, lua_Integer id)
 {
     lua_pushfstring(L, "state id %d", (int)id);
     return throwErrorMessage(L, MTSTATES_ERROR_UNKNOWN_OBJECT);
+}
+int mtstates_ERROR_AMBIGUOUS_NAME_state_name(lua_State* L, const char* stateName, size_t nameLength)
+{
+    mtstates_util_quote_lstring(L, stateName, nameLength);
+    lua_pushfstring(L, "state name %s", lua_tostring(L, -1));
+    return throwErrorMessage(L, MTSTATES_ERROR_AMBIGUOUS_NAME);
 }
 
 bool mtstates_is_ERROR_INTERRUPTED(Error* e)
@@ -379,8 +379,8 @@ int mtstates_error_init_module(lua_State* L, int errorModule)
 {
     mtstates_error_init_meta(L);
 
+    publishError(L, errorModule, MTSTATES_ERROR_AMBIGUOUS_NAME);
     publishError(L, errorModule, MTSTATES_ERROR_CONCURRENT_ACCESS);    
-    publishError(L, errorModule, MTSTATES_ERROR_OBJECT_EXISTS);
     publishError(L, errorModule, MTSTATES_ERROR_OBJECT_CLOSED);
     publishError(L, errorModule, MTSTATES_ERROR_UNKNOWN_OBJECT);
     publishError(L, errorModule, MTSTATES_ERROR_INTERRUPTED);

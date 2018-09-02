@@ -24,8 +24,8 @@ typedef struct {
     MtState* firstState;
 } StateBucket;
 
-static int           state_counter     = 0;
-static int           state_buckets     = 0;
+static AtomicCounter state_counter     = 0;
+static lua_Integer   state_buckets     = 0;
 static int           bucket_usage      = 0;
 static StateBucket*  state_bucket_list = NULL;
 
@@ -33,7 +33,7 @@ typedef struct StateUserData {
     MtState*         state;
 } StateUserData;
 
-inline static void toBuckets(MtState* s, int n, StateBucket* list)
+inline static void toBuckets(MtState* s, lua_Integer n, StateBucket* list)
 {
     StateBucket* bucket        = &(list[s->id % n]);
     MtState**    firstStatePtr = &bucket->firstState;
@@ -49,11 +49,11 @@ inline static void toBuckets(MtState* s, int n, StateBucket* list)
     }
 }
 
-static void newBuckets(int n, StateBucket* newList)
+static void newBuckets(lua_Integer n, StateBucket* newList)
 {
+    bucket_usage = 0;
     if (state_bucket_list) {
-        bucket_usage = 0;
-        int i;
+        lua_Integer i;
         for (i = 0; i < state_buckets; ++i) {
             StateBucket* b = &(state_bucket_list[i]);
             MtState*     s = b->firstState;
@@ -69,25 +69,34 @@ static void newBuckets(int n, StateBucket* newList)
     state_bucket_list = newList;
 }
 
-static MtState* findStateWithName(const char* stateName, size_t stateNameLength)
+static MtState* findStateWithName(const char* stateName, size_t stateNameLength, bool* unique)
 {
+    MtState* rslt = NULL;
     if (stateName && state_bucket_list) {
-        int i;
+        lua_Integer i;
         for (i = 0; i < state_buckets; ++i) {
             StateBucket* b = &(state_bucket_list[i]);
             MtState*     s = b->firstState;
             while (s != NULL) {
                 if (   s->stateName 
                     && stateNameLength == s->stateNameLength 
-                    && memcmp(s->stateName, stateName, stateNameLength) == 0)
+                    && memcmp(s->stateName, stateName, stateNameLength) == 0
+                    && atomic_get(&s->initialized))
                 {
-                    return s;
+                    if (unique) {
+                        *unique = (rslt == NULL);
+                    }
+                    if (rslt) {
+                        return rslt;
+                    } else {
+                        rslt = s;
+                    }
                 }
                 s = s->nextState;
             }
         }
     }
-    return NULL;
+    return rslt;
 }
 
 static MtState* findStateWithId(lua_Integer stateId)
@@ -95,7 +104,7 @@ static MtState* findStateWithId(lua_Integer stateId)
     if (state_bucket_list) {
         MtState* s = state_bucket_list[stateId % state_buckets].firstState;
         while (s != NULL) {
-            if (s->id == stateId) {
+            if (s->id == stateId && atomic_get(&s->initialized)) {
                 return s;
             }
             s = s->nextState;
@@ -290,13 +299,6 @@ static int Mtstates_newState(lua_State* L)
 
     async_mutex_lock(mtstates_global_lock);
 
-    MtState* otherState = findStateWithName(stateName, stateNameLength);
-    if (otherState) {
-        const char* otherString = mtstates_state_tostring(L, otherState);
-        async_mutex_unlock(mtstates_global_lock);
-        return mtstates_ERROR_OBJECT_EXISTS(L, otherString);
-    }
-    
     /* ------------------------------------------------------------------------------------ */
 
     MtState* s = calloc(1, sizeof(MtState));
@@ -319,8 +321,8 @@ static int Mtstates_newState(lua_State* L)
         memcpy(s->stateName, stateName, stateNameLength + 1);
         s->stateNameLength = stateNameLength;
     }
-    if (state_counter + 1 > state_buckets * 4 || bucket_usage > 30) {
-        int n = state_buckets ? (2 * state_buckets) : 64;
+    if (atomic_get(&state_counter) + 1 > state_buckets * 4 || bucket_usage > 30) {
+        lua_Integer n = state_buckets ? (2 * state_buckets) : 64;
         StateBucket* newList = calloc(n, sizeof(StateBucket));
         if (newList) {
             newBuckets(n, newList);
@@ -455,7 +457,7 @@ static int Mtstates_newState(lua_State* L)
     
     /* ------------------------------------------------------------------------------------ */
     atomic_set(&s->initialized, true);
-    state_counter += 1;
+    atomic_inc(&state_counter);
     async_lock_release(&s->stateLock);
     
     return nrslts - 1 + 1;
@@ -494,14 +496,18 @@ static int Mtstates_state(lua_State* L)
 
     MtState* state;
     if (stateName != NULL) {
-        state = findStateWithName(stateName, stateNameLength);
-        if (!state || !atomic_get(&state->initialized)) {
+        bool unique;
+        state = findStateWithName(stateName, stateNameLength, &unique);
+        if (!state) {
             async_mutex_unlock(mtstates_global_lock);
             return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
+        } else if (!unique) {
+            async_mutex_unlock(mtstates_global_lock);
+            return mtstates_ERROR_AMBIGUOUS_NAME_state_name(L, stateName, stateNameLength);
         }
     } else {
         state = findStateWithId(stateId);
-        if (!state || !atomic_get(&state->initialized)) {
+        if (!state) {
             async_mutex_unlock(mtstates_global_lock);
             return mtstates_ERROR_UNKNOWN_OBJECT_state_id(L, stateId);
         }
@@ -532,15 +538,18 @@ static void MtState_free(MtState* s)
     }
     async_lock_destruct(&s->stateLock);
     free(s);
-    state_counter -= 1;
-    if (state_counter == 0) {
-        state_buckets = 0;
-        free(state_bucket_list);
+    
+    int c = atomic_dec(&state_counter);
+    if (c == 0) {
+        if (state_bucket_list)  {
+            free(state_bucket_list);
+        }
+        state_buckets     = 0;
         state_bucket_list = NULL;
         bucket_usage      = 0;
     }
-    else if (state_counter * 10 < state_buckets) {
-        int n = 2 * state_counter;
+    else if (c * 10 < state_buckets) {
+        lua_Integer n = 2 * c;
         if (n > 64) {
             StateBucket* newList = calloc(n, sizeof(StateBucket));
             if (newList) {

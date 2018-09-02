@@ -17,7 +17,7 @@ for run = 1, 2 do
     
     collectgarbage() 
 
-    printf("N = %d, withName = %s", N, withName)
+    printf("N = %d, withName = %s", N, tostring(withName))
     
     local idlist = {}
     local stlist = {}

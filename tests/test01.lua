@@ -23,12 +23,6 @@ do
     print(s1, s1:id())
     assert(s1:name() == "s1")
     assert(s1:call(10) == 11)
-    local _, err = pcall(function() mts.newstate("s1", "") end)
-    print("-------------------------------------")
-    print("-- Expected error:")
-    print(err)
-    print("-------------------------------------")
-    assert(err == mts.error.object_exists)
     s1 = nil
     collectgarbage()
     local s1 = mts.newstate("s1", function()
@@ -65,6 +59,13 @@ do
     print(err)
     print("-------------------------------------")
     assert(err == mts.error.unknown_object)
+    local s1a = mts.newstate("s1", f1)
+    local _, err = pcall(function() mts.state("s1") end)
+    print("-------------------------------------")
+    print("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(err == mts.error.ambiguous_name)
 end
 PRINT("==================================================================================")
 do

@@ -152,11 +152,11 @@ assert(thread:join())
        * error:message()
        * err1 == err2
    * [Errors](#errors)
+       * mtstates.error.ambiguous_name
        * mtstates.error.concurrent_access
        * mtstates.error.interrupted
        * mtstates.error.invoking_state
        * mtstates.error.object_closed
-       * mtstates.error.object_exists
        * mtstates.error.out_of_memory
        * mtstates.error.state_result
        * mtstates.error.unknown_object
@@ -173,8 +173,7 @@ assert(thread:join())
   the setup function are given back as additional results by *mtstates.newstate()*.
   
     * *name*  - optional string, the name of the new state, can be *nil* or 
-                omitted to create a state without name. The name must be unique for
-                all states in the process.
+                omitted to create a state without name.
     * *libs*  - optional boolean, if *true* all standard libraries
                 are opened in the new state, if *false* only the basic lua functions 
                 and the module "package" are loaded, other standard libraries 
@@ -187,8 +186,7 @@ assert(thread:join())
                 are given as arguments to the setup function. Arguments can be
                 simple data types (string, number, boolean, nil, light user data).
 
-  Possible errors: *mtstates.error.object_exists*,
-                   *mtstates.error.invoking_state*,
+  Possible errors: *mtstates.error.invoking_state*,
                    *mtstates.error.state_result*
 
 * **`mtstates.state(id|name)`**
@@ -202,9 +200,12 @@ assert(thread:join())
            *state:id()*.
 
     * *name* - string, the optional name that was given when the
-               state was created with *mtstates.newstate()*.
+               state was created with *mtstates.newstate()*. To
+               find a state by name the name must be unique for
+               the whole process.
 
-  Possible errors: *mtstates.error.unknown_object*
+  Possible errors: *mtstates.error.ambiguous_name*,
+                   *mtstates.error.unknown_object*
 
 
 * **`mtstates.type(arg)`**
@@ -314,6 +315,12 @@ assert(thread:join())
 
 ### Errors
 
+* **`mtstates.error.ambiguous_name`**
+
+  More than one state was found for the given name to *mtstates.state()*.
+  To find a state by name, the state name must be unique among all states
+  in the whole process 
+
 * **`mtstates.error.concurrent_access`**
 
   A state is accessed from two parallel running threads at the same time.
@@ -336,12 +343,6 @@ assert(thread:join())
 
   An operation is performed on a closed state, i.e. the method
   *state:close()* has been called.
-
-* **`mtstates.error.object_exists`**
-
-  A new state is to be created via *mtstates.newstate()*
-  with a name that refers to an already existing state.
-
 
 * **`mtstates.error.out_of_memory`**
 
