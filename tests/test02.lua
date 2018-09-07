@@ -45,14 +45,14 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.unknown_object)
+    assert(err:match(mtstates.error.unknown_object))
     
     local _, err = pcall(function() mtstates.state(firstId + 1) end)
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.unknown_object)
+    assert(err:match(mtstates.error.unknown_object))
 
     local s2 = mtstates.newstate("foo", "return function() end")
     assert(s2:name() == "foo")
@@ -66,7 +66,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.ambiguous_name)
+    assert(err:match(mtstates.error.ambiguous_name))
     
     s2 = nil
     collectgarbage()
@@ -118,7 +118,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.concurrent_access)
+    assert(err:match(mtstates.error.concurrent_access))
     
     local _, err = pcall (function() 
         state:close()
@@ -127,7 +127,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.concurrent_access)
+    assert(err:match(mtstates.error.concurrent_access))
 
     stateIn:addmsg("stop")
     assert(threadOut:nextmsg() == "finished")
@@ -144,7 +144,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mtstates.error.object_closed)
+    assert(err:match(mtstates.error.object_closed))
 
 end
 PRINT("==================================================================================")
@@ -170,10 +170,8 @@ do
                                             print("-------------------------------------")
                                             print("-- Expected error:")
                                             print(err)
-                                            print("-- Expected details:")
-                                            print(err:details())
                                             print("-------------------------------------")
-                                            assert(err == mtstates.error.interrupted)
+                                            assert(err:match(mtstates.error.interrupted))
                                             local _, err = pcall(function()
                                                 stateOut:addmsg("continue1")
                                                 while true do stateIn:nextmsg(0.1) end
@@ -194,10 +192,8 @@ do
                                     print("-------------------------------------")
                                     print("-- Expected error:")
                                     print(err)
-                                    print("-- Expected details:")
-                                    print(err:details())
                                     print("-------------------------------------")
-                                    assert(err == mtstates.error.interrupted)
+                                    assert(err:match(mtstates.error.interrupted))
                                     threadOut:addmsg("interrupted")
                                     assert(threadIn:nextmsg() == "continue2")
                                     assert(state:call("add5", 200) == 205)
@@ -221,10 +217,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
-    print("-- Expected details:")
-    print(err:details())
     print("-------------------------------------")
-    assert(err == mtstates.error.interrupted)
+    assert(err:match(mtstates.error.interrupted))
 
     state:interrupt(false)
     

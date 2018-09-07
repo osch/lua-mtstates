@@ -2,4 +2,4 @@
   local _, err = pcall(function() 
       mtstates.newstate(function() end) 
   end)
-  assert(err == mtstates.error.state_result)
+  assert(err:match(mtstates.error.state_result))

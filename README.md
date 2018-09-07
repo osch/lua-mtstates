@@ -145,12 +145,6 @@ assert(thread:join())
        * state:call()
        * state:interrupt()
        * state:close()
-   * [Error Methods](#error-methods)
-       * error:name()
-       * error:details()
-       * error:traceback()
-       * error:message()
-       * err1 == err2
    * [Errors](#errors)
        * mtstates.error.ambiguous_name
        * mtstates.error.concurrent_access
@@ -218,8 +212,7 @@ assert(thread:join())
   Returns *"userdata"* for userdata where the *__name* field in the metatable is missing
   or does not have a corresponding entry in the lua registry.
   
-  Returns *"mtstates.state"*, or *"mtstates.error"* if the arg is one
-  of the userdata types provided by the mtstates package.
+  Returns *"mtstates.state"* if the arg is the state userdata type provided by this package.
 
 
 <!-- ---------------------------------------------------------------------------------------- -->
@@ -274,46 +267,25 @@ assert(thread:join())
 
 <!-- ---------------------------------------------------------------------------------------- -->
 
-### Error Methods
+### Errors
 
-* **`error:name()`**
+* All errors raised by this module are string values. Special error strings are
+  available in the table `mtstates.error`, example:
 
-  Name of the error as string, example:
-  
   ```lua
   local mtstates = require("mtstates")
-  assert(mtstates.error.object_closed:name() == "mtstates.error.object_closed")
+  assert(mtstates.error.state_result == "mtstates.error.state_result")
   ```
   
-* **`error:details()`**
-
-  Additional details as string regarding this error.
-
-* **`error:traceback()`**
-
-  Stacktrace as string where the error occured.
-
-* **`error:message()`**
-
-  Full message as string containing name, details and traceback.
-  Same as *tostring(error)*.
+  These can be used for error evaluation purposes, example:
   
-* **`err1 == err2`**
-  
-  Two errors are considered equal if they have the same name. This can be used
-  for error evaluation, example:
-
   ```lua
   local mtstates = require("mtstates")
   local _, err = pcall(function() 
       mtstates.newstate(function() end) 
   end)
-  assert(err == mtstates.error.state_result)
+  assert(err:match(mtstates.error.state_result))
   ```
-
-<!-- ---------------------------------------------------------------------------------------- -->
-
-### Errors
 
 * **`mtstates.error.ambiguous_name`**
 
@@ -401,7 +373,7 @@ assert(thread:join())
   assert(thread:join())
   collectgarbage()
   local _, err = pcall(function() mtstates.state(stateId) end)
-  assert(err == mtstates.error.unknown_object)
+  assert(err:match(mtstates.error.unknown_object))
   ```
   
 

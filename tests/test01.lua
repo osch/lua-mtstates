@@ -40,7 +40,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
     print(s3, s3:id())
     assert(s1:name() == "s1")
     assert(s2:name() == "s2")
@@ -58,14 +58,14 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mts.error.unknown_object)
+    assert(err:match(mts.error.unknown_object))
     local s1a = mts.newstate("s1", f1)
     local _, err = pcall(function() mts.state("s1") end)
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mts.error.ambiguous_name)
+    assert(err:match(mts.error.ambiguous_name))
 end
 PRINT("==================================================================================")
 do
@@ -106,16 +106,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    print("-- Expected error name:")
-    print(err:name())
-    print("-------------------------------------")
-    print("-- Expected error details:")
-    print(err:details())
-    print("-------------------------------------")
-    print("-- Expected Traceback:")
-    print(err:traceback())
-    print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -135,16 +126,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    print("-- Expected error name:")
-    print(err:name())
-    print("-------------------------------------")
-    print("-- Expected error details:")
-    print(err:details())
-    print("-------------------------------------")
-    print("-- Expected Traceback:")
-    print(err:traceback())
-    print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -179,7 +161,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -196,10 +178,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
-    print("-- Expected details:")
-    print(err:details())
     print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -214,7 +194,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(err == mts.error.invoking_state)
+    assert(err:match(mts.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -228,7 +208,7 @@ do
         print("-- Expected error:")
         print(err)
         print("-------------------------------------")
-        assert(mtstates.error.state_result == err)
+        assert(err:match(mtstates.error.state_result))
     end
     testcase()
 end
@@ -242,10 +222,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
-    print("-- Expected details:")
-    print(err:details())
     print("-------------------------------------")
-    assert(mtstates.error.invoking_state == err)
+    assert(err:match(mtstates.error.invoking_state))
 end
 PRINT("==================================================================================")
 do
@@ -258,7 +236,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(mtstates.error.state_result == err)
+    assert(err:match(mtstates.error.state_result))
 end
 PRINT("==================================================================================")
 do
@@ -288,7 +266,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(mtstates.error.state_result == err)
+    assert(err:match(mtstates.error.state_result))
 end
 PRINT("==================================================================================")
 do
@@ -304,7 +282,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
-    assert(mtstates.error.object_closed == err)
+    assert(err:match(mtstates.error.object_closed))
 end
 PRINT("==================================================================================")
 do
@@ -398,10 +376,8 @@ do
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
-    print("-- Expected details:")
-    print(err:details())
     print("-------------------------------------")
-    assert(err == mtstates.error.interrupted)
+    assert(err:match(mtstates.error.interrupted))
     
     assert(s:call(200) == 205)
     
@@ -409,7 +385,7 @@ do
     local _, err = pcall(function()
         s:call(100)
     end)
-    assert(err == mtstates.error.interrupted)
+    assert(err:match(mtstates.error.interrupted))
     
     assert(s:call(300) == 305)
 
@@ -418,13 +394,21 @@ do
         local _, err = pcall(function()
             s:call(100)
         end)
-        print("-- Expected error:", err:name(), err:details())
-        assert(err == mtstates.error.interrupted)
+        print("-- Expected error:", err)
+        assert(err:match(mtstates.error.interrupted))
     end
     
     s:interrupt(false)
     assert(s:call(400) == 405)
     
+end
+PRINT("==================================================================================")
+do
+    local ok, err = pcall(function()
+        mtstates.newstate(mtstates.newstate)
+    end)
+    print(err)
+    assert(not ok and err:match("lua function expected"))
 end
 PRINT("==================================================================================")
 print("Done.")

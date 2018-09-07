@@ -30,4 +30,4 @@
   assert(thread:join())
   collectgarbage()
   local _, err = pcall(function() mtstates.state(stateId) end)
-  assert(err == mtstates.error.unknown_object)
+  assert(err:match(mtstates.error.unknown_object))

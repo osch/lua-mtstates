@@ -1,2 +1,2 @@
   local mtstates = require("mtstates")
-  assert(mtstates.error.object_closed:name() == "mtstates.error.object_closed")
+  assert(mtstates.error.state_result == "mtstates.error.state_result")
