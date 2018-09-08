@@ -252,52 +252,47 @@ do
                                     local threadIn  = mtmsg.buffer(threadInId)
                                     local threadOut = mtmsg.buffer(threadOutId)
                                     local s         = mtstates.state(sId)
-                                    assert(threadIn:nextmsg() == "foo1")
-                                    s:call("sleepa", 0.1)
-                                    assert(threadIn:nextmsg() == "foo2")
-                                    s:call("sleepa", 0.1)
-                                    assert(threadIn:nextmsg() == "foo3")
-                                    s:call("sleepa", 0.2)
-                                    assert(threadIn:nextmsg() == "foo4")
-                                    s:call("sleepa", 5)
+                                    while true do
+                                        s:call(threadIn:nextmsg())
+                                    end
                                 end,
                                 threadIn:id(), threadOut:id(), s:id())
     thread:start()
     
     local startTime = mtmsg.time()
-    assert(s:call("sleep", 0.1) == nil)
+    assert(s:call("sleep", 1) == nil)
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
-    assert(math.abs(diffTime - 0.1) < 0.001)
+    assert(math.abs(diffTime - 1) < 0.1)
 
     local startTime = mtmsg.time()
-    assert(s:call("sleep", 0.01) == nil)
+    assert(s:call("sleep", 0.5) == nil)
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
-    assert(math.abs(diffTime - 0.01) < 0.001)
+    assert(math.abs(diffTime - 0.5) < 0.1)
     
     
-    threadIn:addmsg("foo1")
+    threadIn:addmsg("sleepa", 1)
     assert(stateOut:nextmsg() == "started")
     local startTime = mtmsg.time()
-    local ok, rslt = s:tcall(0.01, "add", 3)
+    local ok, rslt = s:tcall(0.5, "add", 3)
     print(ok, rslt)
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
     assert(not ok and rslt == nil)
-    assert(math.abs(diffTime - 0.01) < 0.001)
+    assert(math.abs(diffTime - 0.5) < 0.1)
     
-    threadIn:addmsg("foo2")
+    threadIn:addmsg("sleepa", 1)
     assert(stateOut:nextmsg() == "started")
     local startTime = mtmsg.time()
-    local ok, rslt = s:tcall(0.11, "add", 4)
+    local ok, rslt = s:tcall(1.5, "add", 4)
     print(ok, rslt)
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
     assert(ok and rslt == 104)
-    assert(math.abs(diffTime - 0.1) < 0.001)
+    assert(math.abs(diffTime - 1) < 0.1)
 
-    threadIn:addmsg("foo3")
+    threadIn:addmsg("sleepa", 0.5)
     assert(stateOut:nextmsg() == "started")
     local startTime = mtmsg.time()
     local rslt = s:call("add", 5)
@@ -305,16 +300,16 @@ do
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
     assert(rslt == 105)
-    assert(math.abs(diffTime - 0.2) < 0.001)
+    assert(math.abs(diffTime - 0.5) < 0.1)
 
-    threadIn:addmsg("foo4")
+    threadIn:addmsg("sleepa", 10)
     assert(stateOut:nextmsg() == "started")
     local startTime = mtmsg.time()
     mtmsg.abort(true)
     local ok, err = thread:join()
     local diffTime = mtmsg.time() - startTime
     print(diffTime)
-    assert(math.abs(diffTime) < 0.01)
+    assert(math.abs(diffTime) < 0.1)
     print("-------------------------------------")
     print("-- Expected error:")
     print(err)
