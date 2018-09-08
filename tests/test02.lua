@@ -111,15 +111,8 @@ do
     assert(threadOut:nextmsg() == "started")
     mtmsg.sleep(0.2)
     
-    local _, err = pcall (function() 
-        state:call()
-    end)
-    print("-------------------------------------")
-    print("-- Expected error:")
-    print(err)
-    print("-------------------------------------")
-    assert(err:match(mtstates.error.concurrent_access))
-    
+    local ok = state:tcall(0.1);
+    assert(not ok)
     local _, err = pcall (function() 
         state:close()
     end)
@@ -172,6 +165,7 @@ do
                                             print(err)
                                             print("-------------------------------------")
                                             assert(err:match(mtstates.error.interrupted))
+                                            assert(not err:match(mtstates.error.invoking_state))
                                             local _, err = pcall(function()
                                                 stateOut:addmsg("continue1")
                                                 while true do stateIn:nextmsg(0.1) end
@@ -194,6 +188,7 @@ do
                                     print(err)
                                     print("-------------------------------------")
                                     assert(err:match(mtstates.error.interrupted))
+                                    assert(err:match(mtstates.error.invoking_state))
                                     threadOut:addmsg("interrupted")
                                     assert(threadIn:nextmsg() == "continue2")
                                     assert(state:call("add5", 200) == 205)
@@ -219,6 +214,7 @@ do
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.interrupted))
+    assert(err:match(mtstates.error.invoking_state))
 
     state:interrupt(false)
     
@@ -228,6 +224,104 @@ do
 
     local ok = thread:join()
     assert(ok)
+end
+PRINT("==================================================================================")
+do
+    local threadIn   = mtmsg.newbuffer()
+    local threadOut  = mtmsg.newbuffer()
+    local stateOut   = mtmsg.newbuffer()
+
+    local s = mtstates.newstate(function(stateOutId) 
+        local mtmsg    = require("mtmsg")
+        local stateOut = mtmsg.buffer(stateOutId)
+        return function(cmd, arg)
+            if cmd == "sleep" then
+                mtmsg.sleep(arg)
+            elseif cmd == "sleepa" then
+                stateOut:addmsg("started")
+                mtmsg.sleep(arg)
+            elseif cmd == "add" then 
+                return 100 + arg
+            end
+        end
+    end, stateOut:id())
+
+    local thread = llthreads.new(function(threadInId, threadOutId, sId)
+                                    local mtstates  = require("mtstates")
+                                    local mtmsg     = require("mtmsg")
+                                    local threadIn  = mtmsg.buffer(threadInId)
+                                    local threadOut = mtmsg.buffer(threadOutId)
+                                    local s         = mtstates.state(sId)
+                                    assert(threadIn:nextmsg() == "foo1")
+                                    s:call("sleepa", 0.1)
+                                    assert(threadIn:nextmsg() == "foo2")
+                                    s:call("sleepa", 0.1)
+                                    assert(threadIn:nextmsg() == "foo3")
+                                    s:call("sleepa", 0.2)
+                                    assert(threadIn:nextmsg() == "foo4")
+                                    s:call("sleepa", 5)
+                                end,
+                                threadIn:id(), threadOut:id(), s:id())
+    thread:start()
+    
+    local startTime = mtmsg.time()
+    assert(s:call("sleep", 0.1) == nil)
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(math.abs(diffTime - 0.1) < 0.001)
+
+    local startTime = mtmsg.time()
+    assert(s:call("sleep", 0.01) == nil)
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(math.abs(diffTime - 0.01) < 0.001)
+    
+    
+    threadIn:addmsg("foo1")
+    assert(stateOut:nextmsg() == "started")
+    local startTime = mtmsg.time()
+    local ok, rslt = s:tcall(0.01, "add", 3)
+    print(ok, rslt)
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(not ok and rslt == nil)
+    assert(math.abs(diffTime - 0.01) < 0.001)
+    
+    threadIn:addmsg("foo2")
+    assert(stateOut:nextmsg() == "started")
+    local startTime = mtmsg.time()
+    local ok, rslt = s:tcall(0.11, "add", 4)
+    print(ok, rslt)
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(ok and rslt == 104)
+    assert(math.abs(diffTime - 0.1) < 0.001)
+
+    threadIn:addmsg("foo3")
+    assert(stateOut:nextmsg() == "started")
+    local startTime = mtmsg.time()
+    local rslt = s:call("add", 5)
+    print(rslt)
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(rslt == 105)
+    assert(math.abs(diffTime - 0.2) < 0.001)
+
+    threadIn:addmsg("foo4")
+    assert(stateOut:nextmsg() == "started")
+    local startTime = mtmsg.time()
+    mtmsg.abort(true)
+    local ok, err = thread:join()
+    local diffTime = mtmsg.time() - startTime
+    print(diffTime)
+    assert(math.abs(diffTime) < 0.01)
+    print("-------------------------------------")
+    print("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(not ok and err:match(mtmsg.error.operation_aborted)
+                  and err:match(mtstates.error.invoking_state))
+    mtmsg.abort(false)
 end
 PRINT("==================================================================================")
 print("OK.")

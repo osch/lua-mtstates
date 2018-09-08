@@ -11,6 +11,12 @@ end
 local function PRINT(s)
     print(s.." ("..debug.getinfo(2).currentline..")")
 end
+local function msgh(err)
+    return debug.traceback(err, 2)
+end
+local function pcall(f, ...)
+    return xpcall(f, msgh, ...)
+end
 
 PRINT("==================================================================================")
 do
@@ -377,6 +383,7 @@ do
     print("-- Expected error:")
     print(err)
     print("-------------------------------------")
+    assert(err:match(mtstates.error.invoking_state))
     assert(err:match(mtstates.error.interrupted))
     
     assert(s:call(200) == 205)
@@ -385,6 +392,7 @@ do
     local _, err = pcall(function()
         s:call(100)
     end)
+    assert(err:match(mtstates.error.invoking_state))
     assert(err:match(mtstates.error.interrupted))
     
     assert(s:call(300) == 305)
@@ -395,6 +403,7 @@ do
             s:call(100)
         end)
         print("-- Expected error:", err)
+        assert(err:match(mtstates.error.invoking_state))
         assert(err:match(mtstates.error.interrupted))
     end
     
@@ -409,6 +418,25 @@ do
     end)
     print(err)
     assert(not ok and err:match("lua function expected"))
+end
+PRINT("==================================================================================")
+do
+    local s = mtstates.newstate(function() 
+        local x = 0
+        return function(y)
+            x = x + 1
+            return x + (y and y or 0), y
+        end
+    end)
+    assert(s:call() == 1)
+
+    local ok , rslt1, rslt2 = s:tcall(0)
+    assert(ok and rslt1 == 2 and rslt2 == nil)
+    print(ok, rslt1, rslt2)
+
+    local ok , rslt1, rslt2 = s:tcall(1, 100)
+    print(ok, rslt1, rslt2)
+    assert(ok and rslt1 == 103 and rslt2 == 100)
 end
 PRINT("==================================================================================")
 print("Done.")

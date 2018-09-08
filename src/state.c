@@ -265,7 +265,7 @@ static int Mtstates_newState(lua_State* L)
         async_mutex_unlock(mtstates_global_lock);
     }
     if (this->stateLocked) {
-        async_lock_release(&this->state->stateLock);
+        async_mutex_unlock(&this->state->stateMutex);
     }
     if (this->L2) {
         lua_close(this->L2);
@@ -368,7 +368,7 @@ static int Mtstates_newState2(lua_State* L)
         return mtstates_ERROR_OUT_OF_MEMORY(L);
     }
     this->state = s;
-    async_lock_init(&s->stateLock);
+    async_mutex_init(&s->stateMutex);
     
     s->id        = atomic_inc(&mtstates_id_counter);
     s->used      = 1;
@@ -394,7 +394,7 @@ static int Mtstates_newState2(lua_State* L)
     toBuckets(s, state_buckets, state_bucket_list);
     atomic_inc(&state_counter);
     
-    async_lock_acquire(&s->stateLock);        this->stateLocked  = true;
+    async_mutex_lock(&s->stateMutex);         this->stateLocked  = true;
     async_mutex_unlock(mtstates_global_lock); this->globalLocked = false;
 
     /* ------------------------------------------------------------------------------------ */
@@ -550,7 +550,7 @@ static void MtState_free(MtState* s)
     if (s->stateName) {
         free(s->stateName);
     }
-    async_lock_destruct(&s->stateLock);
+    async_mutex_destruct(&s->stateMutex);
     free(s);
     
     if (wasInBucket) {
@@ -632,31 +632,64 @@ static int MtState_close(lua_State* L)
     StateUserData* udata = luaL_checkudata(L, 1, MTSTATES_STATE_CLASS_NAME);
     MtState*       s     = udata->state;
 
-    if (!async_lock_tryacquire(&s->stateLock)) {
+    async_mutex_lock(&s->stateMutex);
+    
+    if (s->isBusy) {
+        async_mutex_unlock(&s->stateMutex);
         return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
     }
+    
     if (s->L2) {
         lua_close(s->L2);
         s->L2 = NULL;
     }
-    async_lock_release(&s->stateLock);
+    async_mutex_unlock(&s->stateMutex);
     return 0;
 }
 
-static int MtState_call(lua_State* L)
+static int MtState_call2(lua_State* L, bool isTimed)
 {
     int lastarg = lua_gettop(L);
     int arg     = 1;
     StateUserData* udata = luaL_checkudata(L, arg++, MTSTATES_STATE_CLASS_NAME);
     MtState*       s     = udata->state;
 
-    if (!async_lock_tryacquire(&s->stateLock)) {
-        return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
+    lua_Number endTime;
+    lua_Number waitSeconds;
+    
+    if (isTimed) {
+        waitSeconds = luaL_checknumber(L, arg++);
+        endTime     = mtstates_current_time_seconds() + waitSeconds;
     }
+
+    if (!isTimed || waitSeconds > 0) {
+        async_mutex_lock(&s->stateMutex);
+    } else if (!async_mutex_trylock(&s->stateMutex)) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
     if (s->L2 == NULL) {
-        async_lock_release(&s->stateLock);
+        async_mutex_unlock(&s->stateMutex);
         return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
     }
+    while (s->isBusy) {
+        if (isTimed) {
+            lua_Number now = mtstates_current_time_seconds();
+            if (now < endTime) {
+                async_mutex_wait_millis(&s->stateMutex, (int)((endTime - now) * 1000 + 0.5));
+            } else {
+                async_mutex_unlock(&s->stateMutex);
+                lua_pushboolean(L, false);
+                return 1;
+            }
+        } else {
+            async_mutex_wait(&s->stateMutex);
+        }
+    }
+    s->isBusy = true;
+    async_mutex_unlock(&s->stateMutex);
+    
     lua_State* L2 = s->L2;
     int l2start = lua_gettop(L2);
     int l2top = l2start;
@@ -667,7 +700,12 @@ static int MtState_call(lua_State* L)
     int rc = pushArgs(L2, L, arg, lastarg, L);
     if (rc != 0) {
         lua_settop(L2, l2start);
-        async_lock_release(&s->stateLock);
+     
+        async_mutex_lock(&s->stateMutex);
+        s->isBusy = false;
+        async_mutex_notify(&s->stateMutex);
+        async_mutex_unlock(&s->stateMutex);
+     
         return luaL_argerror(L, rc, lua_tostring(L, -1));
     }
     rc = lua_pcall(L2, lastarg - arg + 1, LUA_MULTRET, msghandler);
@@ -678,23 +716,52 @@ static int MtState_call(lua_State* L)
         lua_pushlstring(L, errorString, errorMessageLength); 
         int details = ++ltop;
         lua_settop(L2, l2start);
-        async_lock_release(&s->stateLock);
+
+        async_mutex_lock(&s->stateMutex);
+        s->isBusy = false;
+        async_mutex_notify(&s->stateMutex);
+        async_mutex_unlock(&s->stateMutex);
+
         const char* stateString = mtstates_state_tostring(L, s);
         return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L, details));
     }
     int firstrslt = func;
     int lastrslt  = lua_gettop(L2);
     int nrslts = lastrslt - firstrslt + 1;
+    if (isTimed) {
+        nrslts += 1;
+        lua_pushboolean(L, true);
+    }
     rc = pushArgs(L, L2, firstrslt, lastrslt, L);
     if (rc != 0) {
         lua_settop(L2, l2start);
-        async_lock_release(&s->stateLock);
+
+        async_mutex_lock(&s->stateMutex);
+        s->isBusy = false;
+        async_mutex_notify(&s->stateMutex);
+        async_mutex_unlock(&s->stateMutex);
+
         lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
         return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
     }
     lua_settop(L2, l2start);
-    async_lock_release(&s->stateLock);
+
+    async_mutex_lock(&s->stateMutex);
+    s->isBusy = false;
+    async_mutex_notify(&s->stateMutex);
+    async_mutex_unlock(&s->stateMutex);
+
     return nrslts;
+}
+
+static int MtState_call(lua_State* L)
+{
+    return MtState_call2(L, false);
+}
+
+static int MtState_tcall(lua_State* L)
+{
+    return MtState_call2(L, true);
 }
 
 
@@ -735,6 +802,7 @@ static const luaL_Reg StateMethods[] =
     { "id",         MtState_id         },
     { "name",       MtState_name       },
     { "call",       MtState_call       },
+    { "tcall",      MtState_tcall      },
     { "interrupt",  MtState_interrupt  },
     { "close",      MtState_close      },
     { NULL,         NULL } /* sentinel */

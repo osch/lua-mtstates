@@ -5,9 +5,10 @@ typedef struct MtState {
     AtomicCounter      initialized;
     char*              stateName;
     size_t             stateNameLength;
-    Lock               stateLock;
+    Mutex              stateMutex;
     lua_State*         L2;
     int                callbackref;
+    bool               isBusy;
     
     struct MtState**   prevStatePtr;
     struct MtState*    nextState;

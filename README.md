@@ -72,10 +72,12 @@ thread:join()
 assert("Hello World" == state:call("get"))
 ```
 
-Concurrent access to the same Lua state from different threads is prohibited and
-leads to an error. Therefore state access has to be synchronized by the caller.
+It's not possible for concurrently runnings threads to call a state's callback function
+simultaneously, therefore each call waits until the previous call is finished. It is 
+possible to give a timeout for calling a state callback (see [*state:tcall()*](#tcall)).
+
 The following example uses  [mtmsg]( https://github.com/osch/lua-mtmsg#mtmsg) to
-synchronize access to the state:
+synchronize access to a state:
 
 ```lua
 local llthreads = require("llthreads2.ex")
@@ -143,6 +145,7 @@ assert(thread:join())
        * state:id()
        * state:name()
        * state:call()
+       * state:tcall()
        * state:interrupt()
        * state:close()
    * [Errors](#errors)
@@ -235,15 +238,46 @@ assert(thread:join())
   when the state was created with *mtstates.newstate()*.
   
   * *...* - All argument parameters are transfered to the state and given to the state
-            callback function. The result are transfered back to the invoking state. 
-            Arguments and results can be simple data types (string, number,
+            callback function. Arguments can be simple data types (string, number,
             boolean, nil, light user data).
 
-  Possible errors: *mtstates.error.concurrent_access*,
-                   *mtstates.error.interrupted*,
+  If the state callback function is processed in a concurrently running thread the 
+  *state:call()* method waits for the other call to complete before the state callback
+  function is invoked. See next method *state:tcall()* for calling a state with 
+  timeout parameter.
+
+  Returns the results of the state callback function. Results can be simple data types 
+  (string, number, boolean, nil, light user data).
+
+  Possible errors: *mtstates.error.interrupted*,
                    *mtstates.error.invoking_state*,
                    *mtstates.error.object_closed*,
                    *mtstates.error.state_result*
+
+
+* <a id="tcall">**`state:tcall(timeout, ...)`**</a>
+
+  Invokes the state callback function that was returned by the state setup function
+  when the state was created with *mtstates.newstate()*.
+  
+  * *timeout* float, maximal time in seconds for waiting for a concurrently running
+              call of the state callback function to complete.
+              
+  * *...* - additional argument parameters are transfered to the state and given to the state
+            callback function. Arguments can be simple data types (string, number,
+            boolean, nil, light user data).
+
+  If the state could be accessed within the timeout *state:tcall()* returns the boolean
+  value *true* and all results from the state callback function. Results can be simple 
+  data types (string, number, boolean, nil, light user data).
+  
+  Returns *false* if the state could not be accessed during the timeout.
+
+  Possible errors: *mtstates.error.interrupted*,
+                   *mtstates.error.invoking_state*,
+                   *mtstates.error.object_closed*,
+                   *mtstates.error.state_result*
+
 
 * **`state:interrupt([flag])`**
 
@@ -295,7 +329,8 @@ assert(thread:join())
 
 * **`mtstates.error.concurrent_access`**
 
-  A state is accessed from two parallel running threads at the same time.
+  Raised if *state:close()* is called while the state is processing a call 
+  on a parallel running thread.
 
 * **`mtstates.error.interrupted`**
 
