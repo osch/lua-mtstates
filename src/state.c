@@ -210,7 +210,9 @@ static int pushArg(lua_State* L2, lua_State* L, int arg, lua_State* errorL)
 static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, lua_State* errorL)
 {
     int n = lastarg - firstarg + 1;
-    lua_checkstack(L2, n + LUA_MINSTACK);
+    if (!lua_checkstack(L2, n + LUA_MINSTACK)) {
+        return -1;
+    }
     int arg;
     for (arg = firstarg; arg <= lastarg; ++arg) {
         int rc = pushArg(L2, L, arg, errorL);
@@ -257,21 +259,23 @@ static int Mtstates_newState(lua_State* L)
     lua_pushlightuserdata(L, this);
     lua_insert(L, 2);
 
-    mtstates_membuf_init(&this->stateFunctionBuffer, 0, 2);
+    mtstates_membuf_init(&this->tmp, 0, 2);
 
     int rc = lua_pcall(L, nargs + 1, LUA_MULTRET, 0);
-
-    if (this->globalLocked) {
-        async_mutex_unlock(mtstates_global_lock);
+    {
+        if (this->globalLocked) {
+            async_mutex_unlock(mtstates_global_lock);
+        }
+        if (this->stateLocked) {
+            async_mutex_unlock(&this->state->stateMutex);
+        }
+        if (this->L2) {
+            lua_close(this->L2);
+        }
+        mtstates_membuf_free(&this->tmp);
     }
-    if (this->stateLocked) {
-        async_mutex_unlock(&this->state->stateMutex);
-    }
-    if (this->L2) {
-        lua_close(this->L2);
-    }
-    mtstates_membuf_free(&this->stateFunctionBuffer);
-       
+    luaL_checkstack(L, LUA_MINSTACK, NULL);
+    
     if (rc != LUA_OK) {
         if (this->errorArg) {
             return luaL_argerror(L, this->errorArg - 1, lua_tostring(L, -1));
@@ -282,6 +286,8 @@ static int Mtstates_newState(lua_State* L)
         return this->nrslts;
     }
 }
+
+static int Mtstates_newState3(lua_State* L);
 
 static int Mtstates_newState2(lua_State* L)
 {
@@ -309,16 +315,13 @@ static int Mtstates_newState2(lua_State* L)
         this->openlibs = lua_toboolean(L, arg++);
     }
     
-    const char* stateCode       = NULL;
-    size_t      stateCodeLength = 0;
     if (arg <= lastArg && lua_type(L, arg) == LUA_TSTRING) {
-        stateCode = lua_tolstring(L, arg++, &stateCodeLength);
+        this->stateFunction = arg++;
+        this->stateCode = lua_tolstring(L, this->stateFunction, &this->stateCodeLength);
     }
     
-    int stateFunction = 0;
-    if (stateCode == NULL) {
-        luaL_checktype(L, arg, LUA_TFUNCTION);
-        if (lua_iscfunction(L, arg)) {
+    if (this->stateCode == NULL) {
+        if (lua_type(L, arg) != LUA_TFUNCTION || lua_iscfunction(L, arg)) {
             /* passing c function might by harmful: in the target 
              * state registry entries might not be initialized
              * and not every c function implementation will correctly
@@ -329,31 +332,31 @@ static int Mtstates_newState2(lua_State* L)
             this->errorArg = arg;
             return luaL_error(L, "lua function expected");
         }
-        stateFunction = arg++;
-        const char* varname = lua_getupvalue(L, stateFunction, 1);
+        this->stateFunction = arg++;
+        const char* varname = lua_getupvalue(L, this->stateFunction, 1);
         if (varname) {
             if (strcmp(varname, "_ENV") == 0) {
                 /* _ENV -> function usese global variables */
                 lua_pop(L, 1); /* pop result from first lua_getupvalue */
-                varname = lua_getupvalue(L, stateFunction, 2);
+                varname = lua_getupvalue(L, this->stateFunction, 2);
             }
             if (varname) {
-                this->errorArg = stateFunction;
+                this->errorArg = this->stateFunction;
                 return luaL_error(L, "state function uses upvalue '%s'", varname);
             }
         }
-    }
 
-    
-    if (stateFunction) {
-        mtstates_membuf_reserve(&this->stateFunctionBuffer, 4 * 1024);
-        lua_pushvalue(L, stateFunction);
-        int rc = lua_dump(L, &dumpWriter, &this->stateFunctionBuffer, false);
+        mtstates_membuf_reserve(&this->tmp, 4 * 1024);
+        lua_pushvalue(L, this->stateFunction);
+        int rc = lua_dump(L, &dumpWriter, &this->tmp, false);
         if (rc != 0) {
             return mtstates_ERROR_OUT_OF_MEMORY(L);
         }
         lua_pop(L, 1);
+        this->stateCode       = this->tmp.bufferStart;
+        this->stateCodeLength = this->tmp.bufferLength;
     }
+
     
     StateUserData* udata = lua_newuserdata(L, sizeof(StateUserData));
     memset(udata, 0, sizeof(StateUserData));
@@ -397,14 +400,45 @@ static int Mtstates_newState2(lua_State* L)
     async_mutex_lock(&s->stateMutex);         this->stateLocked  = true;
     async_mutex_unlock(mtstates_global_lock); this->globalLocked = false;
 
+    this->L        = L;
+    this->firstArg = arg;
+    this->lastArg  = lastArg;
+
     /* ------------------------------------------------------------------------------------ */
     
     lua_State* L2 = luaL_newstate();
-    int l2top = 0;
     if (L2 == NULL) {
         return mtstates_ERROR_OUT_OF_MEMORY(L);
     }
     this->L2 = L2;
+    {
+        lua_pushcfunction(L2, errormsghandler2);
+        lua_pushcfunction(L2, Mtstates_newState3);
+        lua_pushlightuserdata(L2, this);
+    
+        int rc = lua_pcall(L2, 1, 0, -3);
+    
+        if (rc != LUA_OK) {
+            if (this->isLError) {
+                lua_pushstring(L, lua_tostring(L2, -1));
+                return lua_error(L);
+            } else {
+                return mtstates_ERROR_INVOKING_STATE(L, NULL, lua_tostring(L2, -1));
+            }
+        } else {
+            lua_pop(L2, 1); /* pop msghandler */
+            return this->nrslts;
+        }
+    }
+}
+
+static int Mtstates_newState3(lua_State* L2)
+{   
+    int arg = 1;
+    NewStateVars* this = (NewStateVars*)lua_touserdata(L2, arg++);
+
+    lua_State* L = this->L;
+
     if (this->openlibs) {
         luaL_openlibs(L2);
     } else {
@@ -420,60 +454,64 @@ static int Mtstates_newState2(lua_State* L)
         lua_pop(L2, 2);
     }
     
-    lua_pushcfunction(L2, errormsghandler2);
-    int msghandler = ++l2top;
-    
-    int rc;
-    if (stateFunction != 0) {
-        rc = luaL_loadbuffer(L2, this->stateFunctionBuffer.bufferStart, 
-                                 this->stateFunctionBuffer.bufferLength, NULL);
-    } else {   
-        rc = luaL_loadbuffer(L2, stateCode, stateCodeLength, stateCode);
-    }
+    int rc = luaL_loadbuffer(L2, this->stateCode, this->stateCodeLength, this->stateCode);
+
     if (rc != LUA_OK) {
-        size_t errorMessageLength;
-        const char* errorMessage = luaL_tolstring(L2, -1, &errorMessageLength);
-        lua_pushlstring(L, errorMessage, errorMessageLength);
-        return lua_error(L);
+        this->errorArg = this->stateFunction;
+        this->isLError = true;
+        return lua_error(L2); /* error has bee pushed by loadbuffer */
     }
-    int func = ++l2top;
-    rc = pushArgs(L2, L, arg, lastArg, L);
+    int func = lua_gettop(L2);
+    rc = pushArgs(L2, L, this->firstArg, this->lastArg, L2);
     if (rc != 0) {
-        this->errorArg = rc;
-        return lua_error(L); /* error has been pushed by pushArgs */
+        if (rc > 0) {
+            this->errorArg = rc;
+            this->isLError = true;
+            return lua_error(L2); /* error has been pushed by pushArgs */
+        } else {
+            this->isLError = true;
+            return mtstates_ERROR_OUT_OF_MEMORY(L2);
+        }
     }
-    rc = lua_pcall(L2, lastArg - arg + 1, LUA_MULTRET, msghandler);
-    if (rc != LUA_OK) {
-        size_t errorMessageLength;
-        const char* errorString = luaL_tolstring(L2, -1, &errorMessageLength);
-        lua_pushlstring(L, errorString, errorMessageLength);
-        return mtstates_ERROR_INVOKING_STATE(L, NULL, lua_tostring(L, -1));
-    }
+    int nargs = this->lastArg - this->firstArg + 1;
+    lua_call(L2, nargs, LUA_MULTRET);
+    luaL_checkstack(L2, LUA_MINSTACK, NULL);
+    
     int firstrslt = func;
     int lastrslt  = lua_gettop(L2);
     int nrslts = lastrslt - firstrslt + 1;
     if (nrslts >= 2) {
-        rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L);
+        rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L2);
         if (rc != 0) {
-            lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
-            return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
+            if (rc > 0) {
+                lua_pushfstring(L2, "state setup function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L2, -1));
+                mtstates_push_ERROR_STATE_RESULT(L2, NULL, lua_tostring(L2, -1));
+                this->isLError = true;
+                return lua_error(L2);
+            } else {
+                this->isLError = true;
+                return mtstates_ERROR_OUT_OF_MEMORY(L2);
+            }
         }
     }
     if (nrslts < 1 || lua_type(L2, firstrslt) != LUA_TFUNCTION) {
         const char* t = (nrslts < 1) ? "nothing" : lua_typename(L2, lua_type(L2, firstrslt));
-        lua_pushfstring(L, "state setup returns %s but a function is required as first result parameter", t);
-        return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
+        lua_pushfstring(L2, "state setup function returned %s but a function is required as first result parameter", t);
+        mtstates_push_ERROR_STATE_RESULT(L2, NULL, lua_tostring(L2, -1));
+        this->isLError = true;
+        return lua_error(L2);
     }
-    s->L2 = L2; this->L2 = NULL;
     lua_pushvalue(L2, firstrslt);
-    s->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
+    this->state->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
+    this->state->L2 = L2; this->L2 = NULL;
     
     /* ------------------------------------------------------------------------------------ */
-    atomic_set(&s->initialized, true);
+    atomic_set(&this->state->initialized, true);
     
     this->nrslts = nrslts - 1 + 1;
-    return this->nrslts;
+    return 0;
 }
+
 
 static int Mtstates_state(lua_State* L)
 {
@@ -647,10 +685,27 @@ static int MtState_close(lua_State* L)
     return 0;
 }
 
+
+static int MtState_call2(lua_State* L, bool isTimed);
+static int MtState_call3(lua_State* L);
+static int MtState_call4(lua_State* L2);
+
+static int MtState_call(lua_State* L)
+{
+    return MtState_call2(L, false);
+}
+
+static int MtState_tcall(lua_State* L)
+{
+    return MtState_call2(L, true);
+}
+
 static int MtState_call2(lua_State* L, bool isTimed)
 {
-    int lastarg = lua_gettop(L);
+    int lastArg = lua_gettop(L);
     int arg     = 1;
+    int nargs   = lastArg;
+    
     StateUserData* udata = luaL_checkudata(L, arg++, MTSTATES_STATE_CLASS_NAME);
     MtState*       s     = udata->state;
 
@@ -690,78 +745,121 @@ static int MtState_call2(lua_State* L, bool isTimed)
     s->isBusy = true;
     async_mutex_unlock(&s->stateMutex);
     
-    lua_State* L2 = s->L2;
-    int l2start = lua_gettop(L2);
-    int l2top = l2start;
-    lua_pushcfunction(L2, errormsghandler2);
-    int msghandler = ++l2top;
-    lua_rawgeti(L2, LUA_REGISTRYINDEX, s->callbackref);
-    int func = ++l2top;
-    int rc = pushArgs(L2, L, arg, lastarg, L);
-    if (rc != 0) {
-        lua_settop(L2, l2start);
-     
-        async_mutex_lock(&s->stateMutex);
-        s->isBusy = false;
-        async_mutex_notify(&s->stateMutex);
-        async_mutex_unlock(&s->stateMutex);
-     
-        return luaL_argerror(L, rc, lua_tostring(L, -1));
-    }
-    rc = lua_pcall(L2, lastarg - arg + 1, LUA_MULTRET, msghandler);
-    if (rc != LUA_OK) {
-        int ltop = lua_gettop(L);
-        size_t errorMessageLength;
-        const char* errorString = luaL_tolstring(L2, -1, &errorMessageLength);
-        lua_pushlstring(L, errorString, errorMessageLength); 
-        int details = ++ltop;
-        lua_settop(L2, l2start);
+    /* ------------------------------------------------------------------- */
+    
+    CallStateVars vars; memset(&vars, 0, sizeof(CallStateVars));
+    CallStateVars* this = &vars;
+    
+    this->L        = L;
+    this->isTimed  = isTimed;
+    this->state    = s;
+    this->firstArg = arg;
+    this->lastArg  = lastArg;
 
-        async_mutex_lock(&s->stateMutex);
-        s->isBusy = false;
-        async_mutex_notify(&s->stateMutex);
-        async_mutex_unlock(&s->stateMutex);
+    lua_pushcfunction(L, MtState_call3);
+    lua_insert(L, 1);
+    
+    lua_pushlightuserdata(L, this);
+    lua_replace(L, 2);
 
-        const char* stateString = mtstates_state_tostring(L, s);
-        return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L, details));
-    }
-    int firstrslt = func;
-    int lastrslt  = lua_gettop(L2);
-    int nrslts = lastrslt - firstrslt + 1;
-    if (isTimed) {
-        nrslts += 1;
-        lua_pushboolean(L, true);
-    }
-    rc = pushArgs(L, L2, firstrslt, lastrslt, L);
-    if (rc != 0) {
-        lua_settop(L2, l2start);
+    int l2start = lua_gettop(s->L2);
 
-        async_mutex_lock(&s->stateMutex);
-        s->isBusy = false;
-        async_mutex_notify(&s->stateMutex);
-        async_mutex_unlock(&s->stateMutex);
+    int rc = lua_pcall(L, nargs, LUA_MULTRET, 0);
+    luaL_checkstack(L, LUA_MINSTACK, NULL);
 
-        lua_pushfstring(L, "state function returns bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
-        return mtstates_ERROR_STATE_RESULT(L, NULL, lua_tostring(L, -1));
-    }
-    lua_settop(L2, l2start);
+    /* ------------------------------------------------------------------- */
+
+    lua_settop(s->L2, l2start);
 
     async_mutex_lock(&s->stateMutex);
     s->isBusy = false;
     async_mutex_notify(&s->stateMutex);
     async_mutex_unlock(&s->stateMutex);
 
-    return nrslts;
+    /* ------------------------------------------------------------------- */
+
+    if (rc != LUA_OK) {
+        if (this->errorArg) {
+            return luaL_argerror(L, this->errorArg, lua_tostring(L, -1));
+        } else {
+            return lua_error(L);
+        }
+    } else {
+        return this->nrslts;
+    }
+}
+    
+static int MtState_call3(lua_State* L)
+{
+    CallStateVars* this = (CallStateVars*)lua_touserdata(L, 1);
+
+    MtState*   s  = this->state;
+    lua_State* L2 = s->L2;
+
+    lua_pushcfunction(L2, errormsghandler2);
+    lua_pushcfunction(L2, MtState_call4);
+    lua_pushlightuserdata(L2, this);
+ 
+    int rc = lua_pcall(L2, 1, 0, -3);
+
+    if (rc != LUA_OK) {
+        if (this->isLError) {
+            lua_pushstring(L, lua_tostring(L2, -1));
+            return lua_error(L);
+        } else {
+            const char* stateString = mtstates_state_tostring(L, s);
+            return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L2, -1));
+        }
+    } else {
+        return this->nrslts;
+    }
 }
 
-static int MtState_call(lua_State* L)
-{
-    return MtState_call2(L, false);
-}
 
-static int MtState_tcall(lua_State* L)
+static int MtState_call4(lua_State* L2)
 {
-    return MtState_call2(L, true);
+    CallStateVars* this = (CallStateVars*)lua_touserdata(L2, 1);
+
+    MtState*   s = this->state;
+    lua_State* L = this->L;
+
+    lua_rawgeti(L2, LUA_REGISTRYINDEX, s->callbackref);
+    int func = lua_gettop(L2);
+    int rc = pushArgs(L2, L, this->firstArg, this->lastArg, L2);
+    if (rc != 0) {
+        if (rc > 0) {
+            this->errorArg = rc;
+            this->isLError = true;
+            return lua_error(L2); /* error has been pushed by pushArgs */
+        } else {
+            this->isLError = true;
+            return mtstates_ERROR_OUT_OF_MEMORY(L2);
+        }
+    }
+    int nargs = this->lastArg - this->firstArg + 1;
+    lua_call(L2, nargs, LUA_MULTRET);
+    luaL_checkstack(L2, LUA_MINSTACK, NULL);
+    int firstrslt = func;
+    int lastrslt  = lua_gettop(L2);
+    int nrslts = lastrslt - firstrslt + 1;
+    if (this->isTimed) {
+        nrslts += 1;
+        lua_pushboolean(L, true);
+    }
+    rc = pushArgs(L, L2, firstrslt, lastrslt, L2);
+    if (rc != 0) {
+        if (rc > 0) {
+            lua_pushfstring(L2, "state callback function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L2, -1));
+            mtstates_push_ERROR_STATE_RESULT(L2, NULL, lua_tostring(L2, -1));
+            this->isLError = true;
+            return lua_error(L2);
+        } else {
+            this->isLError = true;
+            return mtstates_ERROR_OUT_OF_MEMORY(L2);
+        }
+    }
+    this->nrslts = nrslts;
+    return 0;
 }
 
 

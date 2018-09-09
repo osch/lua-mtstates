@@ -22,21 +22,47 @@ typedef struct {
 
 typedef struct 
 {
-    bool openlibs;
-    
     bool globalLocked;
-    
-    MtState* state;
-    
     bool stateLocked;
+    
+    lua_State* L;
 
-    MemBuffer stateFunctionBuffer;
+    int         stateFunction;
+    const char* stateCode;
+    size_t      stateCodeLength;
+    MemBuffer   tmp;
+    
+    int firstArg;
+    int lastArg;
 
+    MtState* state;
+
+    bool openlibs;
     lua_State* L2;
-
+    
+    bool isLError;
+    
     int errorArg;
-
     int nrslts;
 
 } NewStateVars;
+
+typedef struct
+{
+    lua_State* L;
+    
+    bool isTimed;
+    
+    MtState* state;
+    
+    int firstArg;
+    int lastArg;
+
+    bool isLError;
+
+    int errorArg;
+    int nrslts;
+
+} CallStateVars;
+
 

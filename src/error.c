@@ -85,14 +85,23 @@ int mtstates_ERROR_INVOKING_STATE(lua_State* L, const char* stateString, const c
     return throwErrorMessage(L, MTSTATES_ERROR_INVOKING_STATE);
 }
 
-int mtstates_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails)
+void mtstates_push_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails)
 {
     if (stateString != NULL) {
         lua_pushfstring(L, "%s: %s", stateString, errorDetails);
     } else {
         lua_pushstring(L, errorDetails);
     }
-    return throwErrorMessage(L, MTSTATES_ERROR_STATE_RESULT);
+    int messageDetails = lua_gettop(L);
+    pushErrorMessage(L, MTSTATES_ERROR_STATE_RESULT, messageDetails);
+    lua_remove(L, messageDetails);
+}
+
+
+int mtstates_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails)
+{
+    mtstates_push_ERROR_STATE_RESULT(L, stateString, errorDetails);
+    return lua_error(L);
 }
 
 

@@ -5,6 +5,12 @@ local mtstates  = require("mtstates")
 local function PRINT(s)
     print(s.." ("..debug.getinfo(2).currentline..")")
 end
+local function msgh(err)
+    return debug.traceback(err, 2)
+end
+local function pcall(f, ...)
+    return xpcall(f, msgh, ...)
+end
 
 PRINT("==================================================================================")
 do
@@ -42,14 +48,14 @@ do
     
     local _, err = pcall(function() mtstates.state("foo") end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.unknown_object))
     
     local _, err = pcall(function() mtstates.state(firstId + 1) end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.unknown_object))
@@ -63,7 +69,7 @@ do
 
     local _, err = pcall(function() mtstates.state("foo") end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.ambiguous_name))
@@ -117,7 +123,7 @@ do
         state:close()
     end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.concurrent_access))
@@ -134,7 +140,7 @@ do
         state:call()
     end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.object_closed))
@@ -148,6 +154,12 @@ do
     local threadOut = mtmsg.newbuffer()
 
     local state = mtstates.newstate(function(stateInId, stateOutId)
+                                        local function msgh(err)
+                                            return debug.traceback(err, 2)
+                                        end
+                                        local function pcall(f, ...)
+                                            return xpcall(f, msgh, ...)
+                                        end
                                         local mtmsg    = require("mtmsg")
                                         local mtstates = require("mtstates")
                                         local stateIn  = mtmsg.buffer(stateInId)
@@ -161,7 +173,7 @@ do
                                                 while true do stateIn:nextmsg(0.1) end
                                             end)
                                             print("-------------------------------------")
-                                            print("-- Expected error:")
+                                            print("-- Expected error1:")
                                             print(err)
                                             print("-------------------------------------")
                                             assert(err:match(mtstates.error.interrupted))
@@ -175,6 +187,12 @@ do
                                     stateIn:id(), stateOut:id())
     
     local thread = llthreads.new(function(threadInId, threadOutId, stateId)
+                                    local function msgh(err)
+                                        return debug.traceback(err, 2)
+                                    end
+                                    local function pcall(f, ...)
+                                        return xpcall(f, msgh, ...)
+                                    end
                                     local mtstates  = require("mtstates")
                                     local mtmsg     = require("mtmsg")
                                     local threadIn  = mtmsg.buffer(threadInId)
@@ -184,7 +202,7 @@ do
                                         state:call()
                                     end)
                                     print("-------------------------------------")
-                                    print("-- Expected error:")
+                                    print("-- Expected error2:")
                                     print(err)
                                     print("-------------------------------------")
                                     assert(err:match(mtstates.error.interrupted))
@@ -210,7 +228,7 @@ do
         state:call("add5", 10)
     end)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(err:match(mtstates.error.interrupted))
@@ -311,7 +329,7 @@ do
     print(diffTime)
     assert(math.abs(diffTime) < 0.1)
     print("-------------------------------------")
-    print("-- Expected error:")
+    PRINT("-- Expected error:")
     print(err)
     print("-------------------------------------")
     assert(not ok and err:match(mtmsg.error.operation_aborted)

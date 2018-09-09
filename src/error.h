@@ -17,6 +17,10 @@ int mtstates_ERROR_INVOKING_STATE(lua_State* L, const char* stateString, const c
 
 int mtstates_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails);
 
+void mtstates_push_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const char* errorDetails);
+
+
+
 int mtstates_ERROR_OUT_OF_MEMORY(lua_State* L);
 int mtstates_ERROR_OUT_OF_MEMORY_bytes(lua_State* L, size_t bytes);
 
