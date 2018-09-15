@@ -3,7 +3,7 @@
 #include "main.h"
 #include "state_intern.h"
 
-const char* const MTSTATES_STATE_CLASS_NAME = "mtstates.state";
+static const char* const MTSTATES_STATE_CLASS_NAME = "mtstates.state";
 
 
 static AtomicCounter state_counter     = 0;
@@ -223,6 +223,16 @@ static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, lua_
     return 0;
 }
 
+static void setupStateMeta(lua_State* L);
+
+static int pushStateMeta(lua_State* L)
+{
+    if (luaL_newmetatable(L, MTSTATES_STATE_CLASS_NAME)) {
+        setupStateMeta(L);
+    }
+    return 1;
+}
+
 static const luaL_Reg mtstates_stdlibs[] =
 {
 #if LUA_VERSION_NUM > 501
@@ -360,7 +370,8 @@ static int Mtstates_newState2(lua_State* L)
     
     StateUserData* udata = lua_newuserdata(L, sizeof(StateUserData));
     memset(udata, 0, sizeof(StateUserData));
-    luaL_setmetatable(L, MTSTATES_STATE_CLASS_NAME);
+    pushStateMeta(L);        /* -> udata, meta */
+    lua_setmetatable(L, -2); /* -> udata */
 
     async_mutex_lock(mtstates_global_lock); this->globalLocked = true;
 
@@ -538,7 +549,8 @@ static int Mtstates_state(lua_State* L)
 
     StateUserData* userData = lua_newuserdata(L, sizeof(StateUserData));
     memset(userData, 0, sizeof(StateUserData));
-    luaL_setmetatable(L, MTSTATES_STATE_CLASS_NAME);
+    pushStateMeta(L);        /* -> udata, meta */
+    lua_setmetatable(L, -2); /* -> udata */
 
     /* Lock */
     
@@ -920,22 +932,30 @@ static const luaL_Reg ModuleFunctions[] =
     { NULL,        NULL } /* sentinel */
 };
 
-int mtstates_state_init_module(lua_State* L, int module, int stateMeta, int stateClass)
+static void setupStateMeta(lua_State* L)
 {
+    lua_pushstring(L, MTSTATES_STATE_CLASS_NAME);
+    lua_setfield(L, -2, "__metatable");
+
+    luaL_setfuncs(L, StateMetaMethods, 0);
+    
+    lua_newtable(L);  /* StateClass */
+        luaL_setfuncs(L, StateMethods, 0);
+    lua_setfield (L, -2, "__index");
+}
+
+
+int mtstates_state_init_module(lua_State* L, int module)
+{
+    if (luaL_newmetatable(L, MTSTATES_STATE_CLASS_NAME)) {
+        setupStateMeta(L);
+    }
+    lua_pop(L, 1);
+
     lua_pushvalue(L, module);
         luaL_setfuncs(L, ModuleFunctions, 0);
+    lua_pop(L, 1);
 
-        lua_pushvalue(L, stateMeta);
-            luaL_setfuncs(L, StateMetaMethods, 0);
-    
-            lua_pushvalue(L, stateClass);
-                luaL_setfuncs(L, StateMethods, 0);
-    
-    lua_pop(L, 3);
-
-    lua_pushstring(L, MTSTATES_STATE_CLASS_NAME);
-    lua_setfield(L, stateMeta, "__metatable");
-    
     return 0;
 }
 

@@ -139,9 +139,6 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
     int module      = ++n; lua_newtable(L);
     int errorModule = ++n; lua_newtable(L);
 
-    int stateMeta = ++n; luaL_newmetatable(L, MTSTATES_STATE_CLASS_NAME);
-    int stateClass= ++n; lua_newtable(L);
-
     lua_pushvalue(L, module);
         luaL_setfuncs(L, ModuleFunctions, 0);
     lua_pop(L, 1);
@@ -168,15 +165,12 @@ DLL_PUBLIC int luaopen_mtstates(lua_State* L)
         lua_setfield(L, module, "_INFO");
     }
     
-    lua_pushvalue(L, stateClass);
-    lua_setfield (L, stateMeta, "__index");
-
     lua_pushvalue(L, errorModule);
     lua_setfield(L, module, "error");
 
     lua_checkstack(L, LUA_MINSTACK);
     
-    mtstates_state_init_module   (L, module,      stateMeta,    stateClass);
+    mtstates_state_init_module   (L, module);
     mtstates_error_init_module   (L, errorModule);
     
     lua_settop(L, module);

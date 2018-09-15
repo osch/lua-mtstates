@@ -3,8 +3,6 @@
 
 #include "util.h"
 
-extern const char* const MTSTATES_STATE_CLASS_NAME;
-
-int mtstates_state_init_module(lua_State* L, int module, int stateMeta, int stateClass);
+int mtstates_state_init_module(lua_State* L, int module);
 
 #endif /* MTSTATES_STATE_H */
