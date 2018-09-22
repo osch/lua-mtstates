@@ -163,7 +163,7 @@ assert(thread:join())
 
 ### Module Functions
 
-* **`mtstates.newstate([name,][libs,]setup[,...)`**
+* <a id="newstate">**`mtstates.newstate([name,][libs,]setup[,...)`**</a>
 
   Creates a new state. The given setup function is executed in the new state. The
   setup function must return a state callback function which can be called
@@ -188,24 +188,45 @@ assert(thread:join())
                    *mtstates.error.state_result*
 
 * **`mtstates.state(id|name)`**
+* **`mtstates.state(name,[libs,]setup[,...)`**
 
-  Creates a lua object for referencing an existing state. The state must
-  be referenced by its *id* or *name*. Referencing the state by *id* is
-  much faster than referencing by *name* if the number of states 
-  increases.
+  * **First form:**
+  
+    Creates a lua object for referencing an existing state. The state must
+    be referenced by its *id* or *name*. Referencing the state by *id* is
+    much faster than referencing by *name* if the number of states 
+    increases.
+  
+      * *id* - integer, the unique state id that can be obtained by
+             *state:id()*.
+  
+      * *name* - string, the optional name that was given when the
+                 state was created with *mtstates.newstate()*. To
+                 find a state by name the name must be unique for
+                 the whole process.
+  
+    Possible errors: *mtstates.error.ambiguous_name*,
+                     *mtstates.error.unknown_object*
+  
 
-    * *id* - integer, the unique state id that can be obtained by
-           *state:id()*.
+  * **Second form:**
+    
+    Creates a lua object for referencing an existing state by name. If the
+    state referenced by the name does not exist, a new state is created using
+    the supplied parameters. This invocation can be used to atomically construct a
+    globally named state securely from different threads.
+    
+    * *name* - mandatory string, name for finding an existing state. If the state is
+               not found the following parameters are used to create a new state
+               with the given name.
+    
+    * *libs*, *setup*, *...*  - same parameters as in [*mtstates.newstate()*](#newstate).
 
-    * *name* - string, the optional name that was given when the
-               state was created with *mtstates.newstate()*. To
-               find a state by name the name must be unique for
-               the whole process.
-
-  Possible errors: *mtstates.error.ambiguous_name*,
-                   *mtstates.error.unknown_object*
-
-
+    Possible errors: *mtstates.error.ambiguous_name*,
+                     *mtstates.error.invoking_state*,
+                     *mtstates.error.state_result*    
+  
+  
 * **`mtstates.type(arg)`**
 
   Returns the type of *arg* as string. Same as *type(arg)* for builtin types.

@@ -500,4 +500,22 @@ do
     assert(ok and rslt1 == 103 and rslt2 == 100)
 end
 PRINT("==================================================================================")
+do
+    local stateSetup = function()
+        return function(x)
+            return 100 + x
+        end
+    end
+    local _, err = pcall(function()
+        mtstates.state("foo")
+    end)
+    assert(err:match(mtstates.error.unknown_object))
+    local s1 = mtstates.state("foo", stateSetup)
+    local s2 = mtstates.state("foo", stateSetup)
+    assert(s1:id() == s2:id())
+    assert(s2:call(3) == 103)
+    local s3 = mtstates.state("foo")
+    assert(s1:id() == s3:id())
+end
+PRINT("==================================================================================")
 print("Done.")

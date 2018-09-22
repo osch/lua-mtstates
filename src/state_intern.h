@@ -22,6 +22,8 @@ typedef struct {
 
 typedef struct 
 {
+    bool isNewState;
+    
     bool globalLocked;
     bool stateLocked;
     

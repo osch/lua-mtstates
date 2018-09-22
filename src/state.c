@@ -254,12 +254,19 @@ static const luaL_Reg mtstates_stdlibs[] =
     { NULL, NULL}
 };
 
-static int Mtstates_newState2(lua_State* L);
 
+static int Mtstates_newState1(lua_State* L, bool isNewState);
 static int Mtstates_newState(lua_State* L)
+{
+    return Mtstates_newState1(L, true);
+}
+
+static int Mtstates_newState2(lua_State* L);
+static int Mtstates_newState1(lua_State* L, bool isNewState)
 {
     NewStateVars vars; memset(&vars, 0, sizeof(NewStateVars));
     NewStateVars* this = &vars;
+    this->isNewState = isNewState;
 
     int nargs = lua_gettop(L);
 
@@ -301,14 +308,71 @@ static int Mtstates_newState3(lua_State* L);
 
 static int Mtstates_newState2(lua_State* L)
 {
-    int arg = 1;
+    NewStateVars* this = (NewStateVars*)lua_touserdata(L, 1);
     
-    NewStateVars* this = (NewStateVars*)lua_touserdata(L, arg++);
+    const int firstArg = 2;
+    const int lastArg  = lua_gettop(L);
+    const int nargs    = lastArg - firstArg + 1;
+    
+    if (!this->isNewState)
+    {
+        int arg = firstArg;
+        
+        bool hasArg = false;
+        const char* stateName       = NULL;
+        size_t      stateNameLength = 0;
+        lua_Integer stateId         = 0;
+    
+        if (arg <= lastArg) {
+            if (lua_type(L, arg) == LUA_TSTRING) {
+                stateName = lua_tolstring(L, arg++, &stateNameLength);
+                hasArg = true;
+            }
+            else if (lua_type(L, arg) == LUA_TNUMBER && lua_isinteger(L, arg)) {
+                stateId = lua_tointeger(L, arg++);
+                hasArg = true;
+            }
+        }
+        if (!hasArg) {
+            this->errorArg = arg;
+            return luaL_error(L, "state name or id expected");
+        }
+    
+        /* Lock */
+        
+        async_mutex_lock(mtstates_global_lock); this->globalLocked = true;
+    
+        MtState* state = NULL;
+        if (stateName != NULL) {
+            bool unique;
+            state = findStateWithName(stateName, stateNameLength, &unique);
+            if (!state && arg > lastArg) {
+                return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
+            } else if (state && !unique) {
+                return mtstates_ERROR_AMBIGUOUS_NAME_state_name(L, stateName, stateNameLength);
+            }
+        } else {
+            state = findStateWithId(stateId);
+            if (!state) {
+                return mtstates_ERROR_UNKNOWN_OBJECT_state_id(L, stateId);
+            }
+        }
+        if (state) {
+            StateUserData* userData = lua_newuserdata(L, sizeof(StateUserData));
+            memset(userData, 0, sizeof(StateUserData));
+            pushStateMeta(L);        /* -> udata, meta */
+            lua_setmetatable(L, -2); /* -> udata */
+        
+            userData->state = state;
+            atomic_inc(&state->used);
 
-    int firstArg = arg;
-    int lastArg  = lua_gettop(L);
-    int nargs    = lastArg - firstArg + 1;
-
+            this->nrslts = 1;
+            return this->nrslts;        
+        }
+        // else we have a stateName and more args -> create new state
+    }
+    
+    int arg = firstArg;
     const char* stateName       = NULL;
     size_t      stateNameLength = 0;
     if (arg <= lastArg && nargs >= 2) {
@@ -373,7 +437,10 @@ static int Mtstates_newState2(lua_State* L)
     pushStateMeta(L);        /* -> udata, meta */
     lua_setmetatable(L, -2); /* -> udata */
 
-    async_mutex_lock(mtstates_global_lock); this->globalLocked = true;
+    if (!this->globalLocked) {
+        async_mutex_lock(mtstates_global_lock); 
+        this->globalLocked = true;
+    }
 
     /* ------------------------------------------------------------------------------------ */
 
@@ -524,62 +591,10 @@ static int Mtstates_newState3(lua_State* L2)
 }
 
 
+static int Mtstates_newState1(lua_State* L, bool isNewState);
 static int Mtstates_state(lua_State* L)
 {
-    int arg = 1;
-
-    bool hasArg = false;
-    const char* stateName       = NULL;
-    size_t      stateNameLength = 0;
-    lua_Integer stateId         = 0;
-
-    if (lua_gettop(L) >= arg) {
-        if (lua_type(L, arg) == LUA_TSTRING) {
-            stateName = lua_tolstring(L, arg++, &stateNameLength);
-            hasArg = true;
-        }
-        else if (lua_type(L, arg) == LUA_TNUMBER && lua_isinteger(L, arg)) {
-            stateId = lua_tointeger(L, arg++);
-            hasArg = true;
-        }
-    }
-    if (!hasArg) {
-        return luaL_argerror(L, arg, "state name or id expected");
-    }
-
-    StateUserData* userData = lua_newuserdata(L, sizeof(StateUserData));
-    memset(userData, 0, sizeof(StateUserData));
-    pushStateMeta(L);        /* -> udata, meta */
-    lua_setmetatable(L, -2); /* -> udata */
-
-    /* Lock */
-    
-    async_mutex_lock(mtstates_global_lock);
-
-    MtState* state;
-    if (stateName != NULL) {
-        bool unique;
-        state = findStateWithName(stateName, stateNameLength, &unique);
-        if (!state) {
-            async_mutex_unlock(mtstates_global_lock);
-            return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
-        } else if (!unique) {
-            async_mutex_unlock(mtstates_global_lock);
-            return mtstates_ERROR_AMBIGUOUS_NAME_state_name(L, stateName, stateNameLength);
-        }
-    } else {
-        state = findStateWithId(stateId);
-        if (!state) {
-            async_mutex_unlock(mtstates_global_lock);
-            return mtstates_ERROR_UNKNOWN_OBJECT_state_id(L, stateId);
-        }
-    }
-
-    userData->state = state;
-    atomic_inc(&state->used);
-    
-    async_mutex_unlock(mtstates_global_lock);
-    return 1;
+    return Mtstates_newState1(L, false);
 }
 
 
