@@ -141,6 +141,7 @@ assert(thread:join())
    * [Module Functions](#module-functions)
        * mtstates.newstate()
        * mtstates.state()
+       * mtstates.id()
        * mtstates.type()
    * [State Methods](#state-methods)
        * state:id()
@@ -225,6 +226,12 @@ assert(thread:join())
     Possible errors: *mtstates.error.ambiguous_name*,
                      *mtstates.error.invoking_state*,
                      *mtstates.error.state_result*    
+  
+* **`mtstates.id()`**
+
+  Gives the state id of the currently running state invoking this function.
+  Returns `nil` if the current state was not constructed via 
+  *mtstates.newstate()* or the second form of *mtstates.state()*.
   
   
 * **`mtstates.type(arg)`**

@@ -532,6 +532,10 @@ static int Mtstates_newState3(lua_State* L2)
         lua_pop(L2, 2);
     }
     
+    lua_pushlightuserdata(L2, (void*)&state_counter); /* -> key */
+    lua_pushinteger(L2, this->state->id);             /* -> key, value */
+    lua_rawset(L2, LUA_REGISTRYINDEX);                /* -> */
+    
     int rc = luaL_loadbuffer(L2, this->stateCode, this->stateCodeLength, this->stateCode);
 
     if (rc != LUA_OK) {
@@ -921,6 +925,13 @@ static int MtState_name(lua_State* L)
     }
 }
 
+static int Mtstates_id(lua_State* L2)
+{
+    lua_pushlightuserdata(L2, (void*)&state_counter); /* -> key */
+    lua_rawget(L2, LUA_REGISTRYINDEX);                /* -> value */
+    return 1;
+}
+
 
 static const luaL_Reg StateMethods[] = 
 {
@@ -943,7 +954,8 @@ static const luaL_Reg StateMetaMethods[] =
 static const luaL_Reg ModuleFunctions[] = 
 {
     { "newstate",  Mtstates_newState  },
-    { "state",     Mtstates_state  },
+    { "state",     Mtstates_state     },
+    { "id",        Mtstates_id        },
     { NULL,        NULL } /* sentinel */
 };
 
