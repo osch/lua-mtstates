@@ -153,6 +153,7 @@ assert(thread:join())
    * [Errors](#errors)
        * mtstates.error.ambiguous_name
        * mtstates.error.concurrent_access
+       * mtstates.error.cycle_detected
        * mtstates.error.interrupted
        * mtstates.error.invoking_state
        * mtstates.error.object_closed
@@ -278,7 +279,8 @@ assert(thread:join())
   Returns the results of the state callback function. Results can be simple data types 
   (string, number, boolean, nil, light user data).
 
-  Possible errors: *mtstates.error.interrupted*,
+  Possible errors: *mtstates.error.cycle_detected*
+                   *mtstates.error.interrupted*,
                    *mtstates.error.invoking_state*,
                    *mtstates.error.object_closed*,
                    *mtstates.error.state_result*
@@ -360,6 +362,13 @@ assert(thread:join())
 
   Raised if *state:close()* is called while the state is processing a call 
   on a parallel running thread.
+
+* **`mtstates.error.cycle_detected`**
+
+  Raised if *state:call()* of a state is called while it is called by the same
+  thread. This can only occur if one state gets somehow a reference to itself.
+  It is strictly advised not to build cycle of states because this can lead 
+  to memory leaks.
 
 * **`mtstates.error.interrupted`**
 

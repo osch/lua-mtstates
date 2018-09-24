@@ -8,7 +8,9 @@ typedef struct MtState {
     Mutex              stateMutex;
     lua_State*         L2;
     int                callbackref;
+
     bool               isBusy;
+    ThreadId           calledByThread;
     
     struct MtState**   prevStatePtr;
     struct MtState*    nextState;
@@ -66,5 +68,3 @@ typedef struct
     int nrslts;
 
 } CallStateVars;
-
-

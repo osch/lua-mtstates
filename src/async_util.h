@@ -107,6 +107,26 @@ static inline int atomic_set(AtomicCounter* value, int newValue)
 
 /* -------------------------------------------------------------------------------------------- */
 
+#if defined(MTSTATES_ASYNC_USE_PTHREAD)
+typedef pthread_t ThreadId;
+#elif defined(MTSTATES_ASYNC_USE_WINTHREAD)
+typedef DWORD ThreadId;
+#elif defined (MTSTATES_ASYNC_USE_STDTHREAD)
+typedef thrd_t ThreadId;
+#endif
+
+static inline ThreadId async_current_threadid()
+{
+#if defined(MTSTATES_ASYNC_USE_PTHREAD)
+    return pthread_self();
+#elif defined(MTSTATES_ASYNC_USE_WINTHREAD)
+    return GetCurrentThreadId();
+#elif defined (MTSTATES_ASYNC_USE_STDTHREAD)
+    return thrd_current();
+#endif
+}
+
+/* -------------------------------------------------------------------------------------------- */
 
 typedef struct
 {

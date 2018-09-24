@@ -454,7 +454,7 @@ static int Mtstates_newState2(lua_State* L)
     s->id        = atomic_inc(&mtstates_id_counter);
     s->used      = 1;
     udata->state = s; /* now udata is responsible for freeing s */
-    
+
     if (stateName) {
         s->stateName = malloc(stateNameLength + 1);
         if (s->stateName == NULL) {
@@ -515,6 +515,11 @@ static int Mtstates_newState3(lua_State* L2)
     int arg = 1;
     NewStateVars* this = (NewStateVars*)lua_touserdata(L2, arg++);
 
+    /* own state id */
+    lua_pushlightuserdata(L2, (void*)&state_counter); /* -> key */
+    lua_pushinteger(L2, this->state->id);             /* -> key, value */
+    lua_rawset(L2, LUA_REGISTRYINDEX);                /* -> */
+    
     lua_State* L = this->L;
 
     if (this->openlibs) {
@@ -531,10 +536,6 @@ static int Mtstates_newState3(lua_State* L2)
                 }
         lua_pop(L2, 2);
     }
-    
-    lua_pushlightuserdata(L2, (void*)&state_counter); /* -> key */
-    lua_pushinteger(L2, this->state->id);             /* -> key, value */
-    lua_rawset(L2, LUA_REGISTRYINDEX);                /* -> */
     
     int rc = luaL_loadbuffer(L2, this->stateCode, this->stateCodeLength, this->stateCode);
 
@@ -759,6 +760,14 @@ static int MtState_call2(lua_State* L, bool isTimed)
         async_mutex_unlock(&s->stateMutex);
         return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
     }
+    ThreadId myThreadId = async_current_threadid();
+    if (s->isBusy) {
+        if (s->calledByThread == myThreadId) {
+            async_mutex_unlock(&s->stateMutex);
+            return mtstates_ERROR_CYCLE_DETECTED(L);
+        }
+    }
+    
     while (s->isBusy) {
         if (isTimed) {
             lua_Number now = mtstates_current_time_seconds();
@@ -774,6 +783,7 @@ static int MtState_call2(lua_State* L, bool isTimed)
         }
     }
     s->isBusy = true;
+    s->calledByThread = myThreadId;
     async_mutex_unlock(&s->stateMutex);
     
     /* ------------------------------------------------------------------- */
