@@ -13,6 +13,7 @@ static StateBucket*  state_bucket_list = NULL;
 
 typedef struct StateUserData {
     MtState*         state;
+    bool             isOwner;
 } StateUserData;
 
 inline static void toBuckets(MtState* s, lua_Integer n, StateBucket* list)
@@ -51,7 +52,10 @@ static void newBuckets(lua_Integer n, StateBucket* newList)
     state_bucket_list = newList;
 }
 
-static MtState* findStateWithName(const char* stateName, size_t stateNameLength, bool* unique)
+static MtState* findStateWithName(const char* stateName, 
+                                  size_t stateNameLength, 
+                                  bool* unique, 
+                                  bool considerUninitialized)
 {
     MtState* rslt = NULL;
     if (stateName && state_bucket_list) {
@@ -63,7 +67,8 @@ static MtState* findStateWithName(const char* stateName, size_t stateNameLength,
                 if (   s->stateName 
                     && stateNameLength == s->stateNameLength 
                     && memcmp(s->stateName, stateName, stateNameLength) == 0
-                    && atomic_get(&s->initialized))
+                    && !atomic_get(&s->closed)
+                    && (considerUninitialized || atomic_get(&s->initialized)))
                 {
                     if (unique) {
                         *unique = (rslt == NULL);
@@ -86,7 +91,7 @@ static MtState* findStateWithId(lua_Integer stateId)
     if (state_bucket_list) {
         MtState* s = state_bucket_list[stateId % state_buckets].firstState;
         while (s != NULL) {
-            if (s->id == stateId && atomic_get(&s->initialized)) {
+            if (s->id == stateId && atomic_get(&s->initialized) && !atomic_get(&s->closed)) {
                 return s;
             }
             s = s->nextState;
@@ -255,18 +260,18 @@ static const luaL_Reg mtstates_stdlibs[] =
 };
 
 
-static int Mtstates_newState1(lua_State* L, bool isNewState);
+static int Mtstates_newState1(lua_State* L, NewStateMode mode);
 static int Mtstates_newState(lua_State* L)
 {
-    return Mtstates_newState1(L, true);
+    return Mtstates_newState1(L, NEW_STATE);
 }
 
 static int Mtstates_newState2(lua_State* L);
-static int Mtstates_newState1(lua_State* L, bool isNewState)
+static int Mtstates_newState1(lua_State* L, NewStateMode mode)
 {
     NewStateVars vars; memset(&vars, 0, sizeof(NewStateVars));
     NewStateVars* this = &vars;
-    this->isNewState = isNewState;
+    this->newStateMode = mode;
 
     int nargs = lua_gettop(L);
 
@@ -314,7 +319,9 @@ static int Mtstates_newState2(lua_State* L)
     const int lastArg  = lua_gettop(L);
     const int nargs    = lastArg - firstArg + 1;
     
-    if (!this->isNewState)
+    const NewStateMode mode = this->newStateMode;
+    
+    if (mode == FIND_STATE || mode == SINGLETON)
     {
         int arg = firstArg;
         
@@ -338,15 +345,18 @@ static int Mtstates_newState2(lua_State* L)
             return luaL_error(L, "state name or id expected");
         }
     
-        /* Lock */
-        
+        /* ------------------------------------------------------------------------------------ */
+        /* globalLocked */
+
         async_mutex_lock(mtstates_global_lock); this->globalLocked = true;
     
         MtState* state = NULL;
+    
+    findagain:
         if (stateName != NULL) {
             bool unique;
-            state = findStateWithName(stateName, stateNameLength, &unique);
-            if (!state && arg > lastArg) {
+            state = findStateWithName(stateName, stateNameLength, &unique, mode == SINGLETON);
+            if (!state && mode == FIND_STATE) {
                 return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
             } else if (state && !unique) {
                 return mtstates_ERROR_AMBIGUOUS_NAME_state_name(L, stateName, stateNameLength);
@@ -358,6 +368,33 @@ static int Mtstates_newState2(lua_State* L)
             }
         }
         if (state) {
+            async_mutex_lock(&state->stateMutex);
+            if (!atomic_get(&state->initialized)) {
+                if (stateName != NULL) {
+                    if (mode == FIND_STATE) {
+                        async_mutex_unlock(&state->stateMutex);
+                        return mtstates_ERROR_UNKNOWN_OBJECT_state_name(L, stateName, stateNameLength);
+                    } else {
+                        while (state->isBusy) {
+                            async_mutex_wait(&state->stateMutex);
+                        }
+                        if (!atomic_get(&state->initialized)) {
+                            if (state->stateName) {
+                                free(state->stateName);
+                                state->stateName = NULL;
+                                state->stateNameLength = 0;
+                            }
+                            async_mutex_unlock(&state->stateMutex);
+                            goto findagain;
+                        }
+                    }
+                } else {
+                    async_mutex_unlock(&state->stateMutex);
+                    return mtstates_ERROR_UNKNOWN_OBJECT_state_id(L, stateId);
+                }
+            }
+            this->state = state; this->stateLocked = true;
+            
             StateUserData* userData = lua_newuserdata(L, sizeof(StateUserData));
             memset(userData, 0, sizeof(StateUserData));
             pushStateMeta(L);        /* -> udata, meta */
@@ -365,7 +402,10 @@ static int Mtstates_newState2(lua_State* L)
         
             userData->state = state;
             atomic_inc(&state->used);
-
+            if (mode == SINGLETON) {
+                userData->isOwner = true;
+                atomic_inc(&state->owned);
+            }
             this->nrslts = 1;
             return this->nrslts;        
         }
@@ -437,12 +477,13 @@ static int Mtstates_newState2(lua_State* L)
     pushStateMeta(L);        /* -> udata, meta */
     lua_setmetatable(L, -2); /* -> udata */
 
+    /* ------------------------------------------------------------------------------------ */
+    /* globalLocked */
+    
     if (!this->globalLocked) {
         async_mutex_lock(mtstates_global_lock); 
         this->globalLocked = true;
     }
-
-    /* ------------------------------------------------------------------------------------ */
 
     MtState* s = calloc(1, sizeof(MtState));
     if (s == NULL) {
@@ -451,9 +492,12 @@ static int Mtstates_newState2(lua_State* L)
     this->state = s;
     async_mutex_init(&s->stateMutex);
     
-    s->id        = atomic_inc(&mtstates_id_counter);
-    s->used      = 1;
-    udata->state = s; /* now udata is responsible for freeing s */
+    s->id          = atomic_inc(&mtstates_id_counter);
+    s->used        = 1;
+    s->owned       = 1;
+    s->isBusy      = true;
+    udata->state   = s; /* now udata is responsible for freeing s */
+    udata->isOwner = true;
 
     if (stateName) {
         s->stateName = malloc(stateNameLength + 1);
@@ -475,14 +519,18 @@ static int Mtstates_newState2(lua_State* L)
     toBuckets(s, state_buckets, state_bucket_list);
     atomic_inc(&state_counter);
     
-    async_mutex_lock(&s->stateMutex);         this->stateLocked  = true;
     async_mutex_unlock(mtstates_global_lock); this->globalLocked = false;
 
+    /* globalLocked */
+    /* ------------------------------------------------------------------------------------ */
+    
+    /* ------------------------------------------------------------------------------------ */
+    /* busy */
+    
     this->L        = L;
     this->firstArg = arg;
     this->lastArg  = lastArg;
 
-    /* ------------------------------------------------------------------------------------ */
     
     lua_State* L2 = luaL_newstate();
     if (L2 == NULL) {
@@ -585,21 +633,53 @@ static int Mtstates_newState3(lua_State* L2)
         return lua_error(L2);
     }
     lua_pushvalue(L2, firstrslt);
+
+    async_mutex_lock(&this->state->stateMutex); this->stateLocked  = true;
+
     this->state->callbackref = luaL_ref(L2, LUA_REGISTRYINDEX);
     this->state->L2 = L2; this->L2 = NULL;
+    this->state->isBusy      = false;
+    
+    atomic_set(&this->state->initialized, true);
+
+    async_mutex_notify(&this->state->stateMutex);
     
     /* ------------------------------------------------------------------------------------ */
-    atomic_set(&this->state->initialized, true);
     
     this->nrslts = nrslts - 1 + 1;
     return 0;
 }
 
 
-static int Mtstates_newState1(lua_State* L, bool isNewState);
+static int Mtstates_newState1(lua_State* L, NewStateMode mode);
 static int Mtstates_state(lua_State* L)
 {
-    return Mtstates_newState1(L, false);
+    return Mtstates_newState1(L, FIND_STATE);
+}
+static int Mtstates_singleton(lua_State* L)
+{
+    return Mtstates_newState1(L, SINGLETON);
+}
+
+static int MtState_close(lua_State* L)
+{
+    StateUserData* udata = luaL_checkudata(L, 1, MTSTATES_STATE_CLASS_NAME);
+    MtState*       s     = udata->state;
+
+    async_mutex_lock(&s->stateMutex);
+    
+    if (s->isBusy) {
+        async_mutex_unlock(&s->stateMutex);
+        return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
+    }
+    
+    if (s->L2) {
+        lua_close(s->L2);
+        s->L2 = NULL;
+    }
+    atomic_set(&s->closed, true);
+    async_mutex_unlock(&s->stateMutex);
+    return 0;
 }
 
 
@@ -652,7 +732,19 @@ static int MtState_release(lua_State* L)
 
     if (s) {
         async_mutex_lock(mtstates_global_lock);
-
+        
+        async_mutex_lock(&s->stateMutex);
+        if (udata->isOwner) {
+            if (atomic_dec(&s->owned) == 0) {
+                if (!s->isBusy && s->L2 != NULL) {
+                    lua_close(s->L2);
+                    s->L2 = NULL;
+                }
+                atomic_set(&s->closed, true);
+            }
+        }
+        async_mutex_unlock(&s->stateMutex);
+        
         if (atomic_dec(&s->used) == 0) {
             MtState_free(s);
         }
@@ -697,27 +789,6 @@ static int MtState_interrupt(lua_State* L)
     return 0;
 }
 
-static int MtState_close(lua_State* L)
-{
-    StateUserData* udata = luaL_checkudata(L, 1, MTSTATES_STATE_CLASS_NAME);
-    MtState*       s     = udata->state;
-
-    async_mutex_lock(&s->stateMutex);
-    
-    if (s->isBusy) {
-        async_mutex_unlock(&s->stateMutex);
-        return mtstates_ERROR_CONCURRENT_ACCESS(L, mtstates_state_tostring(L, s));
-    }
-    
-    if (s->L2) {
-        lua_close(s->L2);
-        s->L2 = NULL;
-    }
-    async_mutex_unlock(&s->stateMutex);
-    return 0;
-}
-
-
 static int MtState_call2(lua_State* L, bool isTimed);
 static int MtState_call3(lua_State* L);
 static int MtState_call4(lua_State* L2);
@@ -761,26 +832,23 @@ static int MtState_call2(lua_State* L, bool isTimed)
         return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
     }
     ThreadId myThreadId = async_current_threadid();
-    if (s->isBusy) {
-        if (s->calledByThread == myThreadId) {
-            async_mutex_unlock(&s->stateMutex);
-            return mtstates_ERROR_CYCLE_DETECTED(L);
-        }
-    }
+    bool isSelfCall = (s->isBusy && s->calledByThread == myThreadId);
     
-    while (s->isBusy) {
-        if (isTimed) {
-            lua_Number now = mtstates_current_time_seconds();
-            if (now < endTime) {
-                async_mutex_wait_millis(&s->stateMutex, (int)((endTime - now) * 1000 + 0.5));
+    if (s->isBusy && s->calledByThread != myThreadId) {
+        do {
+            if (isTimed) {
+                lua_Number now = mtstates_current_time_seconds();
+                if (now < endTime) {
+                    async_mutex_wait_millis(&s->stateMutex, (int)((endTime - now) * 1000 + 0.5));
+                } else {
+                    async_mutex_unlock(&s->stateMutex);
+                    lua_pushboolean(L, false);
+                    return 1;
+                }
             } else {
-                async_mutex_unlock(&s->stateMutex);
-                lua_pushboolean(L, false);
-                return 1;
+                async_mutex_wait(&s->stateMutex);
             }
-        } else {
-            async_mutex_wait(&s->stateMutex);
-        }
+        } while (s->isBusy);
     }
     s->isBusy = true;
     s->calledByThread = myThreadId;
@@ -810,13 +878,20 @@ static int MtState_call2(lua_State* L, bool isTimed)
 
     /* ------------------------------------------------------------------- */
 
-    lua_settop(s->L2, l2start);
-
-    async_mutex_lock(&s->stateMutex);
-    s->isBusy = false;
-    async_mutex_notify(&s->stateMutex);
-    async_mutex_unlock(&s->stateMutex);
-
+    if (L != s->L2) {
+        lua_settop(s->L2, l2start);
+    }
+    if (!isSelfCall) {
+        async_mutex_lock(&s->stateMutex);
+        s->isBusy = false;
+        if (atomic_get(&s->owned) == 0 && s->L2) {
+            lua_close(s->L2);
+            s->L2 = NULL;
+        }
+        async_mutex_notify(&s->stateMutex);
+        async_mutex_unlock(&s->stateMutex);
+    }
+    
     /* ------------------------------------------------------------------- */
 
     if (rc != LUA_OK) {
@@ -837,21 +912,26 @@ static int MtState_call3(lua_State* L)
     MtState*   s  = this->state;
     lua_State* L2 = s->L2;
 
-    lua_pushcfunction(L2, errormsghandler2);
-    lua_pushcfunction(L2, MtState_call4);
-    lua_pushlightuserdata(L2, this);
- 
-    int rc = lua_pcall(L2, 1, 0, -3);
-
-    if (rc != LUA_OK) {
-        if (this->isLError) {
-            lua_pushstring(L, lua_tostring(L2, -1));
-            return lua_error(L);
+    if (L2 != L) {
+        lua_pushcfunction(L2, errormsghandler2);
+        lua_pushcfunction(L2, MtState_call4);
+        lua_pushlightuserdata(L2, this);
+     
+        int rc = lua_pcall(L2, 1, 0, -3);
+    
+        if (rc != LUA_OK) {
+            if (this->isLError) {
+                lua_pushstring(L, lua_tostring(L2, -1));
+                return lua_error(L);
+            } else {
+                const char* stateString = mtstates_state_tostring(L, s);
+                return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L2, -1));
+            }
         } else {
-            const char* stateString = mtstates_state_tostring(L, s);
-            return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L2, -1));
+            return this->nrslts;
         }
     } else {
+        MtState_call4(L2);
         return this->nrslts;
     }
 }
@@ -935,6 +1015,15 @@ static int MtState_name(lua_State* L)
     }
 }
 
+static int MtState_isOwner(lua_State* L)
+{
+    int arg = 1;
+    StateUserData* udata = luaL_checkudata(L, arg++, MTSTATES_STATE_CLASS_NAME);
+    lua_pushboolean(L, udata->isOwner);
+    return 1;
+}
+
+
 static int Mtstates_id(lua_State* L2)
 {
     lua_pushlightuserdata(L2, (void*)&state_counter); /* -> key */
@@ -951,6 +1040,7 @@ static const luaL_Reg StateMethods[] =
     { "tcall",      MtState_tcall      },
     { "interrupt",  MtState_interrupt  },
     { "close",      MtState_close      },
+    { "isowner",    MtState_isOwner    },
     { NULL,         NULL } /* sentinel */
 };
 
@@ -965,6 +1055,7 @@ static const luaL_Reg ModuleFunctions[] =
 {
     { "newstate",  Mtstates_newState  },
     { "state",     Mtstates_state     },
+    { "singleton", Mtstates_singleton },
     { "id",        Mtstates_id        },
     { NULL,        NULL } /* sentinel */
 };

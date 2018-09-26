@@ -141,6 +141,7 @@ assert(thread:join())
    * [Module Functions](#module-functions)
        * mtstates.newstate()
        * mtstates.state()
+       * mtstates.singleton()
        * mtstates.id()
        * mtstates.type()
    * [State Methods](#state-methods)
@@ -153,7 +154,6 @@ assert(thread:join())
    * [Errors](#errors)
        * mtstates.error.ambiguous_name
        * mtstates.error.concurrent_access
-       * mtstates.error.cycle_detected
        * mtstates.error.interrupted
        * mtstates.error.invoking_state
        * mtstates.error.object_closed
@@ -186,53 +186,66 @@ assert(thread:join())
                 are given as arguments to the setup function. Arguments can be
                 simple data types (string, number, boolean, nil, light user data).
 
+  This function returns a state referencing lua object with *state:isowner() == true*.
+
   Possible errors: *mtstates.error.invoking_state*,
                    *mtstates.error.state_result*
 
 * **`mtstates.state(id|name)`**
-* **`mtstates.state(name,[libs,]setup[,...)`**
 
-  * **First form:**
-  
-    Creates a lua object for referencing an existing state. The state must
-    be referenced by its *id* or *name*. Referencing the state by *id* is
-    much faster than referencing by *name* if the number of states 
-    increases.
-  
-      * *id* - integer, the unique state id that can be obtained by
-             *state:id()*.
-  
-      * *name* - string, the optional name that was given when the
-                 state was created with *mtstates.newstate()*. To
-                 find a state by name the name must be unique for
-                 the whole process.
-  
-    Possible errors: *mtstates.error.ambiguous_name*,
-                     *mtstates.error.unknown_object*
-  
+  Creates a lua object for referencing an existing state. The state must
+  be referenced by its *id* or *name*. Referencing the state by *id* is
+  much faster than referencing by *name* if the number of states 
+  increases.
 
-  * **Second form:**
-    
-    Creates a lua object for referencing an existing state by name. If the
-    state referenced by the name does not exist, a new state is created using
-    the supplied parameters. This invocation can be used to atomically construct a
-    globally named state securely from different threads.
-    
-    * *name* - mandatory string, name for finding an existing state. If the state is
-               not found the following parameters are used to create a new state
-               with the given name.
-    
-    * *libs*, *setup*, *...*  - same parameters as in [*mtstates.newstate()*](#newstate).
+    * *id* - integer, the unique state id that can be obtained by
+           *state:id()*.
 
-    Possible errors: *mtstates.error.ambiguous_name*,
-                     *mtstates.error.invoking_state*,
-                     *mtstates.error.state_result*    
+    * *name* - string, the optional name that was given when the
+               state was created with *mtstates.newstate()*. To
+               find a state by name the name must be unique for
+               the whole process.
+
+  This function returns a state referencing lua object with *state:isowner() == false*.
+
+  Possible errors: *mtstates.error.ambiguous_name*,
+                   *mtstates.error.unknown_object*
+
+
+* **`mtstates.singleton(name,[libs,]setup[,...)`**
+    
+  Creates a lua object for referencing an existing state by name. If the
+  state referenced by the name does not exist, a new state is created using
+  the supplied parameters. This invocation can be used to atomically construct 
+  a globally named state securely from different threads.
+    
+  If *mtstates.singleton()* is called with the same *name* parameter from
+  concurrently running threads the second invocation waits until the first
+  invocation is finished or fails.
+  
+  
+  * *name* - mandatory string, name for finding an existing state. If the state is
+             not found the following parameters are used to create a new state
+             with the given name.
+  
+  * *libs*, *setup*, *...*  - same parameters as in [*mtstates.newstate()*](#newstate).
+  
+  This function returns a state referencing lua object with *state:isowner() == true*.
+
+  This function should only by used for very special use cases: Because references 
+  to the same *mtstates*'s state from different lua states are reference counted
+  special care has to be taken that no reference cycle is constructed using 
+  *mtstates.singleton()*.
+
+  Possible errors: *mtstates.error.ambiguous_name*,
+                   *mtstates.error.invoking_state*,
+                   *mtstates.error.state_result*    
   
 * **`mtstates.id()`**
 
   Gives the state id of the currently running state invoking this function.
   Returns `nil` if the current state was not constructed via 
-  *mtstates.newstate()* or the second form of *mtstates.state()*.
+  *mtstates.newstate()* or *mtstates.singleton()*.
   
   
 * **`mtstates.type(arg)`**
@@ -279,8 +292,7 @@ assert(thread:join())
   Returns the results of the state callback function. Results can be simple data types 
   (string, number, boolean, nil, light user data).
 
-  Possible errors: *mtstates.error.cycle_detected*
-                   *mtstates.error.interrupted*,
+  Possible errors: *mtstates.error.interrupted*,
                    *mtstates.error.invoking_state*,
                    *mtstates.error.object_closed*,
                    *mtstates.error.state_result*
@@ -322,11 +334,29 @@ assert(thread:join())
              at every operation again, if *false* the state is no
              longer interrupted.
 
+             
+* **`state:isowner()`**
+
+  Returns `true` if the state referencing lua object owns the referenced
+  state. If the last owning lua object is garbage collected the underlying 
+  state is closed. 
+  
+  State referencing objects constructed via *mtstates.newstate()* or
+  *mtstates.singleton()* are owning the state.
+  
+  State referencing objects constructed via *mtstates.state()* are 
+  not owning the state.
+  
+
 * **`state:close()`**
 
   Closes the underlying state and frees the memory. Every operation from any
-  referencing object raises a *mtstates.error.object_closed*. A closed state
-  cannot be reactivated.
+  referencing object raises a *mtstates.error.object_closed*. 
+  
+  A closed state cannot be found via its name or id using the function
+  *mtstates.state()*.
+  
+  A closed state cannot be reactivated.
 
   Possible errors: *mtstates.error.concurrent_access*
 
@@ -362,13 +392,6 @@ assert(thread:join())
 
   Raised if *state:close()* is called while the state is processing a call 
   on a parallel running thread.
-
-* **`mtstates.error.cycle_detected`**
-
-  Raised if *state:call()* of a state is called while it is called by the same
-  thread. This can only occur if one state gets somehow a reference to itself.
-  It is strictly advised not to build cycle of states because this can lead 
-  to memory leaks.
 
 * **`mtstates.error.interrupted`**
 
@@ -407,45 +430,31 @@ assert(thread:join())
   cannot be created because the object cannot be found by
   the given id or name. 
   
-  All mtstates objects are subject to garbage collection and therefore a reference to a 
-  created object is needed to keep it alive, i.e. if you want to pass an object
-  to another thread via name or id, a reference to this object should be kept in the
-  thread that created the object, until the receiving thread signaled that a reference
-  to the object has been constructed in the receiving thread, example:
+  All mtstates objects are subject to garbage collection and therefore a owning
+  reference to a created object is needed to keep it alive, example:
 
   ```lua
-  local llthreads = require("llthreads2.ex")
-  local mtmsg     = require("mtmsg")
   local mtstates  = require("mtstates")
-  local threadIn  = mtmsg.newbuffer()
-  local threadOut = mtmsg.newbuffer()
-  local state     = mtstates.newstate("return function() end")
-  local stateId   = state:id()
-  local thread    = llthreads.new(function(inId, outId, stateId)
-                                      local mtmsg     = require("mtmsg")
-                                      local mtstates  = require("mtstates")
-                                      local threadIn  = mtmsg.buffer(inId)
-                                      local threadOut = mtmsg.buffer(outId)
-                                      local state     = mtstates.state(stateId)
-                                      assert(state:id() == stateId)
-                                      threadOut:addmsg("started")
-                                      assert(threadIn:nextmsg() == "exit")
-                                      threadOut:addmsg("finished")
-                                  end,
-                                  threadIn:id(),
-                                  threadOut:id(),
-                                  stateId)
-  -- state = nil -- not now!
-  -- collectgarbage()
-  thread:start()
-  assert(threadOut:nextmsg() == "started")
-  state = nil -- now it's safe
+  local s1 = mtstates.newstate("return function() return 3 end")
+  local id = s1:id()
+  local s2 = mtstates.state(id)
+  local s3 = mtstates.state(id)
+  assert(s1:isowner() == true)
+  assert(s2:isowner() == false)
+  assert(s3:isowner() == false)
+  s2 = nil
   collectgarbage()
-  threadIn:addmsg("exit")
-  assert(threadOut:nextmsg() == "finished")
-  assert(thread:join())
+  assert(s3:call() == 3)
+  assert(mtstates.state(id):id() == id)
+  s1 = nil
   collectgarbage()
-  local _, err = pcall(function() mtstates.state(stateId) end)
+  local _, err = pcall(function()
+      s3:call()
+  end)
+  assert(err:match(mtstates.error.object_closed))
+  local _, err = pcall(function()
+      mtstates.state(id)
+  end)
   assert(err:match(mtstates.error.unknown_object))
   ```
   

@@ -2,7 +2,9 @@
 typedef struct MtState {
     lua_Integer        id;
     AtomicCounter      used;
+    AtomicCounter      owned;
     AtomicCounter      initialized;
+    AtomicCounter      closed;
     char*              stateName;
     size_t             stateNameLength;
     Mutex              stateMutex;
@@ -22,9 +24,15 @@ typedef struct {
     MtState* firstState;
 } StateBucket;
 
+typedef enum {
+    NEW_STATE,
+    FIND_STATE,
+    SINGLETON
+} NewStateMode;
+
 typedef struct 
 {
-    bool isNewState;
+    NewStateMode newStateMode;
     
     bool globalLocked;
     bool stateLocked;

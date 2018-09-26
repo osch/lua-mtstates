@@ -42,7 +42,7 @@ do
                                 end,
                                 threadIn:id(), threadOut:id())
     thread:start()
-    
+        
     assert(threadOut:nextmsg() == "started")
     mtmsg.sleep(0.2)
     

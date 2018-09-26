@@ -10,7 +10,6 @@ static const char* const MTSTATES_ERROR_INVOKING_STATE    = "invoking_state";
 static const char* const MTSTATES_ERROR_INTERRUPTED       = "interrupted";
 static const char* const MTSTATES_ERROR_STATE_RESULT      = "state_result";
 static const char* const MTSTATES_ERROR_OUT_OF_MEMORY     = "out_of_memory";
-static const char* const MTSTATES_ERROR_CYCLE_DETECTED    = "cycle_detected";
 
 
 static void pushErrorMessage(lua_State* L, const char* name, int details)
@@ -105,11 +104,6 @@ int mtstates_ERROR_STATE_RESULT(lua_State* L, const char* stateString, const cha
     return lua_error(L);
 }
 
-int mtstates_ERROR_CYCLE_DETECTED(lua_State* L)
-{
-    return throwError(L, MTSTATES_ERROR_CYCLE_DETECTED);
-}
-
 int mtstates_ERROR_OUT_OF_MEMORY(lua_State* L)
 {
     return throwError(L, MTSTATES_ERROR_OUT_OF_MEMORY);
@@ -141,7 +135,6 @@ int mtstates_error_init_module(lua_State* L, int errorModule)
     publishError(L, errorModule, MTSTATES_ERROR_INTERRUPTED);
     publishError(L, errorModule, MTSTATES_ERROR_INVOKING_STATE);
     publishError(L, errorModule, MTSTATES_ERROR_STATE_RESULT);
-    publishError(L, errorModule, MTSTATES_ERROR_CYCLE_DETECTED);
     publishError(L, errorModule, MTSTATES_ERROR_OUT_OF_MEMORY);
     
     return 0;
