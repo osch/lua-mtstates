@@ -150,6 +150,7 @@ assert(thread:join())
        * state:call()
        * state:tcall()
        * state:interrupt()
+       * state:isowner()
        * state:close()
    * [Errors](#errors)
        * mtstates.error.ambiguous_name
