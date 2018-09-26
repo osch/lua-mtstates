@@ -54,7 +54,9 @@ typedef struct
     
     bool isLError;
     
-    int errorArg;
+    int   errorArg;
+    char* errorArgMsg;
+
     int nrslts;
 
 } NewStateVars;
@@ -72,7 +74,21 @@ typedef struct
 
     bool isLError;
 
-    int errorArg;
+    int   errorArg;
+    char* errorArgMsg;
+    
     int nrslts;
 
 } CallStateVars;
+
+
+static void setErrorArgMsg(char** errorArgMsg, lua_State* L2)
+{
+    size_t len;
+    const char* lmsg = lua_tolstring(L2, -1, &len);
+    char* msg = malloc(len + 1);
+    if (msg) {
+        memcpy(msg, lmsg, len + 1);
+        *errorArgMsg = msg; /* error message without stack trace */
+    }
+}

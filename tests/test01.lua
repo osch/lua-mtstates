@@ -99,6 +99,14 @@ do
     assert(x == 4 and y == 5)
     print(s1, s1:id())
     print(s2, s2:id())
+    
+    local _, err = pcall(function() s2:call("fooarg", 2, {}) end)
+    print("-------------------------------------")
+    PRINT("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(err:match("bad argument #3"))
+    
     local _, err = pcall(function() s2:call() end)
     print("-------------------------------------")
     PRINT("-- Expected error:")

@@ -145,7 +145,7 @@ static const char* udataToLuaString(lua_State* L, StateUserData* udata)
     }
 }
 
-static int errormsghandler2(lua_State* L2)
+static int errormsghandler(lua_State* L2, int level)
 {
     const char* msg = lua_tostring(L2, 1);
     if (msg == NULL) {  /* is error object not a string? */
@@ -158,8 +158,13 @@ static int errormsghandler2(lua_State* L2)
                                       luaL_typename(L2, 1));
         }
     }
-    luaL_traceback(L2, L2, msg, 1);  /* append a standard traceback */
+    luaL_traceback(L2, L2, msg, level);  /* append a standard traceback */
     return 1;  /* return the traceback */
+
+}
+static int errormsghandler1(lua_State* L2)
+{
+    return errormsghandler(L2, 1);
 }
 
 static int dumpWriter(lua_State* L, const void* p, size_t sz, void* ud)
@@ -300,6 +305,10 @@ static int Mtstates_newState1(lua_State* L, NewStateMode mode)
     
     if (rc != LUA_OK) {
         if (this->errorArg) {
+            if (this->errorArgMsg) {
+                lua_pushstring(L, this->errorArgMsg); 
+                free(this->errorArgMsg);
+            }
             return luaL_argerror(L, this->errorArg - 1, lua_tostring(L, -1));
         } else {
             return lua_error(L);
@@ -538,7 +547,7 @@ static int Mtstates_newState2(lua_State* L)
     }
     this->L2 = L2;
     {
-        lua_pushcfunction(L2, errormsghandler2);
+        lua_pushcfunction(L2, errormsghandler1);
         lua_pushcfunction(L2, Mtstates_newState3);
         lua_pushlightuserdata(L2, this);
     
@@ -590,6 +599,7 @@ static int Mtstates_newState3(lua_State* L2)
     if (rc != LUA_OK) {
         this->errorArg = this->stateFunction;
         this->isLError = true;
+        setErrorArgMsg(&this->errorArgMsg, L2);
         return lua_error(L2); /* error has bee pushed by loadbuffer */
     }
     int func = lua_gettop(L2);
@@ -598,6 +608,7 @@ static int Mtstates_newState3(lua_State* L2)
         if (rc > 0) {
             this->errorArg = rc;
             this->isLError = true;
+            setErrorArgMsg(&this->errorArgMsg, L2);
             return lua_error(L2); /* error has been pushed by pushArgs */
         } else {
             this->isLError = true;
@@ -865,15 +876,25 @@ static int MtState_call2(lua_State* L, bool isTimed)
     this->firstArg = arg;
     this->lastArg  = lastArg;
 
+    int msgh = 0;
+    int func = 1;
+    if (L == s->L2) 
+    {
+        lua_pushcfunction(L, errormsghandler1);
+        lua_insert(L, 1);
+        msgh = 1;
+        func = 2;
+    }
+    
     lua_pushcfunction(L, MtState_call3);
-    lua_insert(L, 1);
+    lua_insert(L, func);
     
     lua_pushlightuserdata(L, this);
-    lua_replace(L, 2);
+    lua_replace(L, func + 1);
 
     int l2start = lua_gettop(s->L2);
 
-    int rc = lua_pcall(L, nargs, LUA_MULTRET, 0);
+    int rc = lua_pcall(L, nargs, LUA_MULTRET, msgh);
     luaL_checkstack(L, LUA_MINSTACK, NULL);
 
     /* ------------------------------------------------------------------- */
@@ -896,6 +917,10 @@ static int MtState_call2(lua_State* L, bool isTimed)
 
     if (rc != LUA_OK) {
         if (this->errorArg) {
+            if (this->errorArgMsg) {
+                lua_pushstring(L, this->errorArgMsg); 
+                free(this->errorArgMsg);
+            }
             return luaL_argerror(L, this->errorArg, lua_tostring(L, -1));
         } else {
             return lua_error(L);
@@ -913,7 +938,7 @@ static int MtState_call3(lua_State* L)
     lua_State* L2 = s->L2;
 
     if (L2 != L) {
-        lua_pushcfunction(L2, errormsghandler2);
+        lua_pushcfunction(L2, errormsghandler1);
         lua_pushcfunction(L2, MtState_call4);
         lua_pushlightuserdata(L2, this);
      
@@ -951,7 +976,8 @@ static int MtState_call4(lua_State* L2)
         if (rc > 0) {
             this->errorArg = rc;
             this->isLError = true;
-            return lua_error(L2); /* error has been pushed by pushArgs */
+            setErrorArgMsg(&this->errorArgMsg, L2);
+            return lua_error(L2);  /* error has been pushed by pushArgs */
         } else {
             this->isLError = true;
             return mtstates_ERROR_OUT_OF_MEMORY(L2);

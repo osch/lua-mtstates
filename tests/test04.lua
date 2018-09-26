@@ -35,6 +35,10 @@ do
                                             return 100 + arg
                                         elseif cmd == "add2" then
                                             return thisState:call("add", 1000 + arg)
+                                        elseif cmd == "err1" then
+                                            local x = thisState:call("add", {})
+                                        elseif cmd == "err2" then
+                                            return thisState:call("err1")
                                         end
                                     end
                                 end)
@@ -43,6 +47,21 @@ do
     s:call("setstate", stateId)
     assert(s:call("add",  2) ==  102)
     assert(s:call("add2", 3) == 1103)
+
+    local _, err = pcall(function() s:call("err1") end)
+    print("-------------------------------------")
+    PRINT("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(err:match(mtstates.error.invoking_state))
+
+    local _, err = pcall(function() s:call("err2") end)
+    print("-------------------------------------")
+    PRINT("-- Expected error:")
+    print(err)
+    print("-------------------------------------")
+    assert(err:match(mtstates.error.invoking_state))
+    assert(err:match("bad argument #2 to 'call'"))
 
     s = nil
     collectgarbage()
