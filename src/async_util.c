@@ -71,7 +71,7 @@ void mtstates_async_mutex_init(Mutex* mutex)
                                 FALSE, /* non-signaled initially */
                                 NULL); /* unnamed */
 
-    if (mutex->event == NULL) { async_util_abort((int)mutex->event, __LINE__); }
+    if (mutex->event == NULL) { async_util_abort(0, __LINE__); }
 
 #elif defined(MTSTATES_ASYNC_USE_STDTHREAD)
     int rc = mtx_init(&mutex->mutex, mtx_plain | mtx_recursive);
