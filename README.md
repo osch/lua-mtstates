@@ -33,7 +33,7 @@ See below for full [reference documentation](#documentation).
    * Other Unix variants: could work, but untested, required are:
       * gcc atomic builtins or C11 `stdatomic.h`
       * `pthread.h` or C11 `threads.h`
-   * Tested Lua versions: 5.1, 5.2, 5.3, luajit 2.0 & 2.1
+   * Tested Lua versions: 5.1, 5.2, 5.3, 5.4, luajit 2.0 & 2.1
 
 <!-- ---------------------------------------------------------------------------------------- -->
 

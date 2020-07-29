@@ -1,8 +1,9 @@
 package = "mtstates"
-version = "scm-0"
+version = "0.4.2-1"
+local versionNumber = version:gsub("^(.*)-.-$", "%1")
 source = {
-  url = "https://github.com/osch/lua-mtstates/archive/master.zip",
-  dir = "lua-mtstates-master",
+  url = "https://github.com/osch/lua-mtstates/archive/v"..versionNumber..".zip",
+  dir = "lua-mtstates-"..versionNumber,
 }
 description = {
   summary = "Multi-threading Lua states",
@@ -45,7 +46,7 @@ build = {
           "src/async_util.c",
           "src/mtstates_compat.c",
       },
-      defines = { "MTSTATES_VERSION="..version:gsub("^(.*)-.-$", "%1") },
+      defines = { "MTSTATES_VERSION="..versionNumber },
     },
   }
 }
