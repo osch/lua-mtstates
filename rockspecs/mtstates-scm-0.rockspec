@@ -26,13 +26,6 @@ build = {
           libraries = {"pthread"},
         }
       }
-    },
-    windows = {
-      modules = {
-        mtstates = {
-          libraries = {"kernel32"},
-        }
-      }
     }
   },
   modules = {
