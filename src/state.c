@@ -1,6 +1,7 @@
 #include "state.h"
 #include "error.h"
 #include "main.h"
+#include "notify_capi.h"
 #include "state_intern.h"
 
 static const char* const MTSTATES_STATE_CLASS_NAME = "mtstates.state";
@@ -801,6 +802,7 @@ static int MtState_interrupt(lua_State* L)
 }
 
 static int MtState_call2(lua_State* L, bool isTimed);
+static int MtState_call2a(lua_State* L, bool isTimed, int arg, MtState* s, notifier_error_handler eh, void* ehdata);
 static int MtState_call3(lua_State* L);
 static int MtState_call4(lua_State* L2);
 
@@ -816,31 +818,46 @@ static int MtState_tcall(lua_State* L)
 
 static int MtState_call2(lua_State* L, bool isTimed)
 {
-    int lastArg = lua_gettop(L);
-    int arg     = 1;
-    int nargs   = lastArg;
-    
+    int arg = 1;
     StateUserData* udata = luaL_checkudata(L, arg++, MTSTATES_STATE_CLASS_NAME);
-    MtState*       s     = udata->state;
+    return MtState_call2a(L, isTimed, arg, udata->state, NULL, NULL);
+}
+
+static int MtState_call2a(lua_State* L, bool isTimed, int arg, MtState* s, notifier_error_handler notify_eh, void* notify_ehdata)
+{
+    int lastArg = L ? lua_gettop(L) : 0;
+    int nargs   = lastArg;
 
     lua_Number endTime;
     lua_Number waitSeconds;
     
     if (isTimed) {
-        waitSeconds = luaL_checknumber(L, arg++);
-        endTime     = mtstates_current_time_seconds() + waitSeconds;
+        if (L) {
+            waitSeconds = luaL_checknumber(L, arg++);
+        } else {
+            waitSeconds = ((lua_Number)arg) / 1000;
+        }
+        endTime = mtstates_current_time_seconds() + waitSeconds;
     }
 
     if (!isTimed || waitSeconds > 0) {
         async_mutex_lock(&s->stateMutex);
     } else if (!async_mutex_trylock(&s->stateMutex)) {
-        lua_pushboolean(L, false);
-        return 1;
+        if (L) {
+            lua_pushboolean(L, false);
+            return 1;
+        } else {
+            return 100; // time out
+        }
     }
 
     if (s->L2 == NULL) {
         async_mutex_unlock(&s->stateMutex);
-        return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
+        if (L) {
+            return mtstates_ERROR_OBJECT_CLOSED(L, mtstates_state_tostring(L, s));
+        } else {
+            return 101; // closed
+        }
     }
     ThreadId myThreadId = async_current_threadid();
     bool isSelfCall = (s->isBusy && s->calledByThread == myThreadId);
@@ -853,8 +870,12 @@ static int MtState_call2(lua_State* L, bool isTimed)
                     async_mutex_wait_millis(&s->stateMutex, (int)((endTime - now) * 1000 + 0.5));
                 } else {
                     async_mutex_unlock(&s->stateMutex);
-                    lua_pushboolean(L, false);
-                    return 1;
+                    if (L) {
+                        lua_pushboolean(L, false);
+                        return 1;
+                    } else {
+                        return 100; // time out
+                    }
                 }
             } else {
                 async_mutex_wait(&s->stateMutex);
@@ -867,66 +888,107 @@ static int MtState_call2(lua_State* L, bool isTimed)
     
     /* ------------------------------------------------------------------- */
     
-    CallStateVars vars; memset(&vars, 0, sizeof(CallStateVars));
-    CallStateVars* this = &vars;
-    
-    this->L        = L;
-    this->isTimed  = isTimed;
-    this->state    = s;
-    this->firstArg = arg;
-    this->lastArg  = lastArg;
-
-    int msgh = 0;
-    int func = 1;
-    if (L == s->L2) 
+    if (L) 
     {
-        lua_pushcfunction(L, errormsghandler1);
-        lua_insert(L, 1);
-        msgh = 1;
-        func = 2;
-    }
+       CallStateVars vars; memset(&vars, 0, sizeof(CallStateVars));
+       CallStateVars* this = &vars;
+       
+       this->L             = L;
+       this->isTimed       = isTimed;
+       this->state         = s;
+       this->firstArg      = arg;
+       this->lastArg       = lastArg;
     
-    lua_pushcfunction(L, MtState_call3);
-    lua_insert(L, func);
-    
-    lua_pushlightuserdata(L, this);
-    lua_replace(L, func + 1);
-
-    int l2start = lua_gettop(s->L2);
-
-    int rc = lua_pcall(L, nargs, LUA_MULTRET, msgh);
-    luaL_checkstack(L, LUA_MINSTACK, NULL);
-
-    /* ------------------------------------------------------------------- */
-
-    if (L != s->L2) {
-        lua_settop(s->L2, l2start);
-    }
-    if (!isSelfCall) {
-        async_mutex_lock(&s->stateMutex);
-        s->isBusy = false;
-        if (atomic_get(&s->owned) == 0 && s->L2) {
-            lua_close(s->L2);
-            s->L2 = NULL;
+        int msgh = 0;
+        int func = 1;
+        if (L == s->L2) 
+        {
+            lua_pushcfunction(L, errormsghandler1);
+            lua_insert(L, 1);
+            msgh = 1;
+            func = 2;
         }
-        async_mutex_notify(&s->stateMutex);
-        async_mutex_unlock(&s->stateMutex);
-    }
+        
+        lua_pushcfunction(L, MtState_call3);
+        lua_insert(L, func);
+        
+        lua_pushlightuserdata(L, this);
+        lua_replace(L, func + 1);
     
-    /* ------------------------------------------------------------------- */
-
-    if (rc != LUA_OK) {
-        if (this->errorArg) {
-            if (this->errorArgMsg) {
-                lua_pushstring(L, this->errorArgMsg); 
-                free(this->errorArgMsg);
+        int l2start = lua_gettop(s->L2);
+    
+        int rc = lua_pcall(L, nargs, LUA_MULTRET, msgh);
+        luaL_checkstack(L, LUA_MINSTACK, NULL);
+    
+        /* ------------------------------------------------------------------- */
+    
+        if (L != s->L2) {
+            lua_settop(s->L2, l2start);
+        }
+        if (!isSelfCall) {
+            async_mutex_lock(&s->stateMutex);
+            s->isBusy = false;
+            if (atomic_get(&s->owned) == 0 && s->L2) {
+                lua_close(s->L2);
+                s->L2 = NULL;
             }
-            return luaL_argerror(L, this->errorArg, lua_tostring(L, -1));
-        } else {
-            return lua_error(L);
+            async_mutex_notify(&s->stateMutex);
+            async_mutex_unlock(&s->stateMutex);
         }
-    } else {
-        return this->nrslts;
+        
+        /* ------------------------------------------------------------------- */
+    
+        if (rc != LUA_OK) {
+            if (this->errorArg) {
+                if (this->errorArgMsg) {
+                    lua_pushstring(L, this->errorArgMsg); 
+                    free(this->errorArgMsg);
+                }
+                return luaL_argerror(L, this->errorArg, lua_tostring(L, -1));
+            } else {
+                return lua_error(L);
+            }
+        } else {
+            return this->nrslts;
+        }
+    }
+    else {
+        /* ------------------------------------------------------------------- */
+
+        int notifier_rc = 0;
+        
+        if (lua_checkstack(s->L2, 10))
+        {
+            int l2start = lua_gettop(s->L2);
+            lua_pushcfunction(s->L2, errormsghandler1);              /* -> errorHandler */
+            lua_rawgeti(s->L2, LUA_REGISTRYINDEX, s->callbackref);   /* -> errorHandler, callback */
+            int lua_rc = lua_pcall(s->L2, 0, 0, -2);
+            if (lua_rc != LUA_OK) {
+                if (notify_eh) {
+                    size_t       msglen = 0;
+                    const char*  msg    = lua_tolstring(s->L2, -1, &msglen);
+                    notify_eh(notify_ehdata, msg, msglen);
+                }
+                notifier_rc = 990;
+            }
+            lua_settop(s->L2, l2start);
+        } else {
+            notifier_rc = 999;
+        }
+        if (!isSelfCall) {
+            async_mutex_lock(&s->stateMutex);
+            s->isBusy = false;
+            if (atomic_get(&s->owned) == 0 && s->L2) {
+                lua_close(s->L2);
+                s->L2 = NULL;
+            }
+            async_mutex_notify(&s->stateMutex);
+            async_mutex_unlock(&s->stateMutex);
+        }
+
+        return notifier_rc;
+
+        /* ------------------------------------------------------------------- */
     }
 }
     
@@ -1058,6 +1120,75 @@ static int Mtstates_id(lua_State* L2)
 }
 
 
+/* ============================================================================================ */
+
+static notify_notifier* notify_capi_toNotifier(lua_State* L, int index)
+{
+    void* state = lua_touserdata(L, index);
+    if (state) {
+        if (lua_getmetatable(L, index))
+        {                                                      /* -> meta1 */
+            if (luaL_getmetatable(L, MTSTATES_STATE_CLASS_NAME)
+                != LUA_TNIL)                                   /* -> meta1, meta2 */
+            {
+                if (lua_rawequal(L, -1, -2)) {                 /* -> meta1, meta2 */
+                    state = ((StateUserData*)state)->state;
+                } else {
+                    state = NULL;
+                }
+            }                                                  /* -> meta1, meta2 */
+            lua_pop(L, 2);                                     /* -> */
+        }                                                      /* -> */
+    }
+    return state;
+}
+
+static void notify_capi_retainNotifier(notify_notifier* n)
+{
+    MtState* state = (MtState*)n;
+    atomic_inc(&state->used);
+}
+
+static void notify_capi_releaseNotifier(notify_notifier* n)
+{
+    MtState* state = (MtState*)n;
+    if (state) {
+        async_mutex_lock(mtstates_global_lock);
+        if (atomic_dec(&state->used) <= 0) {
+            MtState_free(state);
+        }
+        async_mutex_unlock(mtstates_global_lock);
+    }
+}
+
+static int notify_capi_notify(notify_notifier* n, notifier_error_handler eh, void* ehdata)
+{
+    MtState* state = (MtState*)n;
+    int rc = MtState_call2a(NULL, false, 0, state, eh, ehdata);
+    if (rc == 101) {
+        return 1; // closed
+    } else {
+        return rc;
+    }
+}
+
+static const notify_capi notify_capi_impl =
+{
+    NOTIFY_CAPI_VERSION_MAJOR,
+    NOTIFY_CAPI_VERSION_MINOR,
+    NOTIFY_CAPI_VERSION_PATCH,
+    NULL, // next_capi
+    
+    notify_capi_toNotifier,
+
+    notify_capi_retainNotifier,
+    notify_capi_releaseNotifier,
+
+    notify_capi_notify
+};
+
+/* ============================================================================================ */
+
 static const luaL_Reg StateMethods[] = 
 {
     { "id",         MtState_id         },
@@ -1087,15 +1218,18 @@ static const luaL_Reg ModuleFunctions[] =
 };
 
 static void setupStateMeta(lua_State* L)
-{
-    lua_pushstring(L, MTSTATES_STATE_CLASS_NAME);
-    lua_setfield(L, -2, "__metatable");
+{                                                       /* -> meta */
+    lua_pushstring(L, MTSTATES_STATE_CLASS_NAME);       /* -> meta, className */
+    lua_setfield(L, -2, "__metatable");                 /* -> meta */
 
-    luaL_setfuncs(L, StateMetaMethods, 0);
+    luaL_setfuncs(L, StateMetaMethods, 0);              /* -> meta */
     
-    lua_newtable(L);  /* StateClass */
-        luaL_setfuncs(L, StateMethods, 0);
-    lua_setfield (L, -2, "__index");
+    lua_newtable(L);  /* StateClass */                  /* -> meta, StateClass */
+    luaL_setfuncs(L, StateMethods, 0);                  /* -> meta, StateClass */
+    lua_setfield (L, -2, "__index");                    /* -> meta */
+    
+    lua_pushlightuserdata(L, (void*)&notify_capi_impl); /* -> meta, capi */
+    lua_setfield(L, -2, "_capi_notify");                /* -> meta */
 }
 
 
