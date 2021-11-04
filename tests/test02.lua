@@ -12,6 +12,7 @@ local function pcall(f, ...)
     return xpcall(f, msgh, ...)
 end
 
+function RUN()
 PRINT("==================================================================================")
 do
     local threadIn  = mtmsg.newbuffer()
@@ -277,17 +278,19 @@ do
                                 threadIn:id(), threadOut:id(), s:id())
     thread:start()
     
+    local eps = 0.2
+
     local startTime = mtmsg.time()
     assert(s:call("sleep", 1) == nil)
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
-    assert(math.abs(diffTime - 1) < 0.1)
+    PRINT(diffTime)
+    assert(math.abs(diffTime - 1) < eps)
 
     local startTime = mtmsg.time()
     assert(s:call("sleep", 0.5) == nil)
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
-    assert(math.abs(diffTime - 0.5) < 0.1)
+    PRINT(diffTime)
+    assert(math.abs(diffTime - 0.5) < eps)
     
     
     threadIn:addmsg("sleepa", 1)
@@ -296,9 +299,9 @@ do
     local ok, rslt = s:tcall(0.5, "add", 3)
     print(ok, rslt)
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
+    PRINT(diffTime)
     assert(not ok and rslt == nil)
-    assert(math.abs(diffTime - 0.5) < 0.1)
+    assert(math.abs(diffTime - 0.5) < eps)
     
     threadIn:addmsg("sleepa", 1)
     assert(stateOut:nextmsg() == "started")
@@ -306,19 +309,19 @@ do
     local ok, rslt = s:tcall(1.5, "add", 4)
     print(ok, rslt)
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
+    PRINT(diffTime)
     assert(ok and rslt == 104)
-    assert(math.abs(diffTime - 1) < 0.1)
+    assert(math.abs(diffTime - 1) < eps)
 
     threadIn:addmsg("sleepa", 0.5)
     assert(stateOut:nextmsg() == "started")
     local startTime = mtmsg.time()
     local rslt = s:call("add", 5)
-    print(rslt)
+    PRINT(rslt)
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
+    PRINT(diffTime)
     assert(rslt == 105)
-    assert(math.abs(diffTime - 0.5) < 0.1)
+    assert(math.abs(diffTime - 0.5) < eps)
 
     threadIn:addmsg("sleepa", 10)
     assert(stateOut:nextmsg() == "started")
@@ -326,8 +329,8 @@ do
     mtmsg.abort(true)
     local ok, err = thread:join()
     local diffTime = mtmsg.time() - startTime
-    print(diffTime)
-    assert(math.abs(diffTime) < 0.1)
+    PRINT(diffTime)
+    assert(math.abs(diffTime) < eps)
     print("-------------------------------------")
     PRINT("-- Expected error:")
     print(err)
@@ -338,3 +341,13 @@ do
 end
 PRINT("==================================================================================")
 print("OK.")
+end -- function RUN
+
+local ok, err = pcall(function()
+    RUN()
+end)
+
+if not ok then
+    print(err)
+    os.exit(1) -- doesn't wait for running threads
+end

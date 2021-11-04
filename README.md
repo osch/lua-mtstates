@@ -1,6 +1,6 @@
 # mtstates 
 [![Licence](http://img.shields.io/badge/Licence-MIT-brightgreen.svg)](LICENSE)
-[![Build Status](https://travis-ci.org/osch/lua-mtstates.svg?branch=master)](https://travis-ci.org/osch/lua-mtstates)
+[![build status](https://github.com/osch/lua-mtstates/workflows/test/badge.svg)](https://github.com/osch/lua-mtstates/actions/workflows/test.yml)
 [![Build status](https://ci.appveyor.com/api/projects/status/v8t6rsf45dwt60pl/branch/master?svg=true)](https://ci.appveyor.com/project/osch/lua-mtstates/branch/master)
 [![Install](https://img.shields.io/badge/Install-LuaRocks-brightgreen.svg)](https://luarocks.org/modules/osch/mtstates)
 

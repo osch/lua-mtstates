@@ -1,10 +1,15 @@
 local load = loadstring and loadstring or load
 local dump = string.dump
+
+print("test01 started")
+print("Lua Version", _VERSION, jit and " (jit)" or "")
+
 local mtstates = require("mtstates")
 local mts      = mtstates
-print("test01 started")
+
 print("mtstates._VERSION", mts._VERSION)
 print("mtstates._INFO", mts._INFO)
+
 local function line()
     return debug.getinfo(2).currentline
 end

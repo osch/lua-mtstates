@@ -12,6 +12,7 @@ environment:
   - LUA: "lua 5.1"
   - LUA: "lua 5.2"
   - LUA: "lua 5.3"
+  - LUA: "lua 5.4"
 
 platform:
   - x64
@@ -46,7 +47,7 @@ before_build:
 build_script:
   - echo "Making..."
   - luarocks install lua-llthreads2
-  - luarocks install mtmsg
+  - luarocks --server=https://luarocks.org/dev install mtmsg
   - luarocks make rockspecs/mtstates-scm-0.rockspec
 
 before_test:
@@ -54,17 +55,18 @@ before_test:
 
 test_script:
   - echo "Testing..."
+  - cd %APPVEYOR_BUILD_FOLDER%\tests
+  - lua test01.lua
+  - lua test02.lua
+  - lua test03.lua
+  - lua test04.lua
   - cd %APPVEYOR_BUILD_FOLDER%\examples
   - lua example01.lua
   - lua example02.lua
   - lua example03.lua
   - lua example04.lua
   - lua example05.lua
-  - cd %APPVEYOR_BUILD_FOLDER%\tests
-  - lua test01.lua
-  - lua test02.lua
-  - lua test03.lua
-  - lua test04.lua
+  - lua example06.lua
 
 after_test:
   # deploy
