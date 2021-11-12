@@ -1,3 +1,7 @@
+#ifndef MTSTATES_STATE_INTERN
+#define MTSTATES_STATE_INTERN
+
+typedef struct receiver_writer receiver_writer;
 
 typedef struct MtState {
     lua_Integer        id;
@@ -81,6 +85,11 @@ typedef struct
 
 } CallStateVars;
 
+typedef struct StateUserData {
+    MtState*         state;
+    bool             isOwner;
+} StateUserData;
+
 
 static void setErrorArgMsg(char** errorArgMsg, lua_State* L2)
 {
@@ -92,3 +101,13 @@ static void setErrorArgMsg(char** errorArgMsg, lua_State* L2)
         *errorArgMsg = msg; /* error message without stack trace */
     }
 }
+
+void mtstates_state_free(MtState* state);
+
+typedef void (*mtstates_capi_error_handler)(void* ehdata, const char* msg, size_t msglen);
+
+int mtstates_state_call(lua_State* L, bool isTimed, int arg, 
+                        MtState* s, receiver_writer* writer,
+                        mtstates_capi_error_handler eh, void* ehdata);
+
+#endif /* MTSTATES_STATE_INTERN */

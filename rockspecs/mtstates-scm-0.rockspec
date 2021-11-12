@@ -35,6 +35,8 @@ build = {
           "src/state.c",
           "src/error.c",
           "src/util.c",
+          "src/notify_capi_impl.c",
+          "src/receiver_capi_impl.c",
           "src/async_util.c",
           "src/mtstates_compat.c",
       },

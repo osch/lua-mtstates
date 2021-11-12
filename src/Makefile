@@ -7,7 +7,7 @@ LNX_GCC_RUN := gcc -shared -fPIC -O2
 WIN_GCC_RUN := gcc -shared -fPIC -O2
 MAC_GCC_RUN := MACOSX_DEPLOYMENT_TARGET=10.8 gcc -O2 -bundle -undefined dynamic_lookup -all_load
 
-LNX_COPTS   :=
+LNX_COPTS   := -g
 WIN_COPTS   := -I/mingw64/include/lua5.1 
 MAC_COPTS   := -I/usr/local/opt/lua/include/lua5.3 
 
@@ -42,6 +42,7 @@ mtstates:
 	$(GCC_RUN) $(COPTS) \
 	    -D MTSTATES_VERSION=Makefile"-$(BUILD_DATE)" \
 	    main.c         state.c        error.c      util.c   \
+	    notify_capi_impl.c receiver_capi_impl.c \
 	    async_util.c   mtstates_compat.c  \
 	    $(LOPTS) \
 	    -o build/lua$(LUA_VERSION)/mtstates.$(SO_EXT)
