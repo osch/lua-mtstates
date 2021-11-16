@@ -9,6 +9,10 @@
 typedef struct notify_notifier notify_notifier;
 typedef struct notify_capi     notify_capi;
 
+#ifndef NOTIFY_CAPI_IMPLEMENT_SET_CAPI
+#  define NOTIFY_CAPI_IMPLEMENT_SET_CAPI 0
+#endif
+
 #ifndef NOTIFY_CAPI_IMPLEMENT_GET_CAPI
 #  define NOTIFY_CAPI_IMPLEMENT_GET_CAPI 0
 #endif
