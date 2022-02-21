@@ -159,14 +159,19 @@ static int receiver_set_capi(lua_State* L, int index, const receiver_capi* capi)
 #if RECEIVER_CAPI_IMPLEMENT_GET_CAPI
 /**
  * Gives the associated Receiver C API for the object at the given stack index.
+ * Returns NULL, if the object at the given stack index does not have an 
+ * associated Receiver C API or only has a Receiver C API with incompatible version
+ * number. If errorReason is not NULL it receives the error reason in this case:
+ * 1 for incompatible version nummber and 2 for no associated C API at all.
  */
-static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* versionError)
+static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* errorReason)
 {
-    if (luaL_getmetafield(L, index, RECEIVER_CAPI_ID_STRING) == LUA_TUSERDATA) /* -> _capi */
+    if (luaL_getmetafield(L, index, RECEIVER_CAPI_ID_STRING) != LUA_TNIL)      /* -> _capi */
     {
         void** udata = lua_touserdata(L, -1);                                  /* -> _capi */
 
-        if (   (lua_rawlen(L, -1) >= sizeof(void*) + strlen(RECEIVER_CAPI_ID_STRING) + 1)
+        if (   udata
+            && (lua_rawlen(L, -1) >= sizeof(void*) + strlen(RECEIVER_CAPI_ID_STRING) + 1)
             && (memcmp((char*)(udata + 1), RECEIVER_CAPI_ID_STRING, 
                        strlen(RECEIVER_CAPI_ID_STRING) + 1) == 0))
         {
@@ -180,12 +185,20 @@ static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* vers
                 }
                 capi = capi->next_capi;
             }
-            if (versionError) {
-                *versionError = 1;
+            if (errorReason) {
+                *errorReason = 1;
             }
-        }                                                                 /* -> _capi */
-        lua_pop(L, 1);                                                    /* -> */
-    }                                                                     /* -> */
+        } else {                                                               /* -> _capi */
+            if (errorReason) {
+                *errorReason = 2;
+            }
+        }                                                                      /* -> _capi */
+        lua_pop(L, 1);                                                         /* -> */
+    } else {                                                                   /* -> */
+        if (errorReason) {
+            *errorReason = 2;
+        }
+    }                                                                          /* -> */
     return NULL;
 }
 #endif /* RECEIVER_CAPI_IMPLEMENT_GET_CAPI */

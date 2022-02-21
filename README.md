@@ -189,11 +189,17 @@ assert(thread:join())
 
   This function returns a state referencing lua object with *state:isowner() == true*.
   
-  State objects implement the *Notify C API*, see [src/notify_capi.h](./src/notify_capi.h),
+  State objects implement the [Notify C API], see [src/notify_capi.h](./src/notify_capi.h),
   i.e. the state object has an an associated meta table entry *_capi_notify* delivered by
   the C API function *notify_get_capi()* and the associated C API function *toNotifier()* returns
   a valid pointer for a given state object. The notify will invoke the state's callback
   function without arguments. See also [example06.lua](./examples/example06.lua).
+
+  State objects also implement the [Receiver C API], i.e. native code can pass 
+  arguments to the state's callback function from any thread.
+
+  [Notify C API]:   https://github.com/lua-capis/lua-notify-capi
+  [Receiver C API]: https://github.com/lua-capis/lua-receiver-capi
 
   Possible errors: *mtstates.error.invoking_state*,
                    *mtstates.error.state_result*
