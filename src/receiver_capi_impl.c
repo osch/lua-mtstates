@@ -144,6 +144,23 @@ static int addStringToWriter(receiver_writer* writer, const char* value, size_t 
     return rc;
 }
 
+static int addBytesToWriter(receiver_writer* writer, const unsigned char* value, size_t len)
+{
+    int rc = mtstates_membuf_reserve(&writer->mem, 2*len);
+    if (rc == 0) {
+        char* dest = writer->mem.bufferStart + writer->mem.bufferLength;
+        size_t i;
+        for (i = 0; i < len; ++i) {
+            *dest++ = BUFFER_BYTE;
+            *dest++ = ((char)(value[i]));
+        }
+        writer->mem.bufferLength += 2*len;
+        writer->nargs += len;
+    }
+    return rc;
+}
+
+
 static int msgToReceiver(receiver_object* receiver, receiver_writer* writer, 
                          int clear, int nonblock,
                          receiver_error_handler eh, void* ehdata)
@@ -176,10 +193,11 @@ const receiver_capi mtstates_receiver_capi_impl =
     newWriter,
     freeWriter,
 
+    msgToReceiver,
+
     clearWriter,
     addBooleanToWriter,
     addIntegerToWriter,
     addStringToWriter,
-
-    msgToReceiver,
+    addBytesToWriter,
 };

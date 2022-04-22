@@ -3,7 +3,7 @@
 
 #define RECEIVER_CAPI_ID_STRING     "_capi_receiver"
 #define RECEIVER_CAPI_VERSION_MAJOR -1
-#define RECEIVER_CAPI_VERSION_MINOR  1
+#define RECEIVER_CAPI_VERSION_MINOR  2
 #define RECEIVER_CAPI_VERSION_PATCH  0
 
 typedef struct receiver_object receiver_object;
@@ -81,26 +81,6 @@ struct receiver_capi
     void (*freeWriter)(receiver_writer* w);
 
     /**
-     * Does not need to be thread safe.
-     */
-    void (*clearWriter)(receiver_writer* w);
-
-    /**
-     * Does not need to be thread safe.
-     */
-    int  (*addBooleanToWriter)(receiver_writer* w, int b);
-
-    /**
-     * Does not need to be thread safe.
-     */
-    int  (*addIntegerToWriter)(receiver_writer* w, lua_Integer i);
-
-    /**
-     * Does not need to be thread safe.
-     */
-    int  (*addStringToWriter)(receiver_writer* w, const char* s, size_t len);
-
-    /**
      * Must be thread safe.
      *
      * Send the writer's content to the receiver. If successfull, the writer's content
@@ -135,6 +115,31 @@ struct receiver_capi
                          int clear, int nonblock,
                          receiver_error_handler eh, void* ehdata);
 
+    /**
+     * Does not need to be thread safe.
+     */
+    void (*clearWriter)(receiver_writer* w);
+
+    /**
+     * Does not need to be thread safe.
+     */
+    int  (*addBooleanToWriter)(receiver_writer* w, int b);
+
+    /**
+     * Does not need to be thread safe.
+     */
+    int  (*addIntegerToWriter)(receiver_writer* w, lua_Integer i);
+
+    /**
+     * Does not need to be thread safe.
+     */
+    int  (*addStringToWriter)(receiver_writer* w, const char* s, size_t len);
+
+    /**
+     * Adds each byte as an integer value between 0 and 255.
+     * Does not need to be thread safe.
+     */
+    int  (*addBytesToWriter)(receiver_writer* w, const unsigned char* s, size_t len);
 };
 
 
