@@ -2,9 +2,9 @@
 #define RECEIVER_CAPI_H
 
 #define RECEIVER_CAPI_ID_STRING     "_capi_receiver"
-#define RECEIVER_CAPI_VERSION_MAJOR -1
-#define RECEIVER_CAPI_VERSION_MINOR  2
-#define RECEIVER_CAPI_VERSION_PATCH  0
+#define RECEIVER_CAPI_VERSION_MAJOR  0
+#define RECEIVER_CAPI_VERSION_MINOR  0
+#define RECEIVER_CAPI_VERSION_PATCH  1
 
 typedef struct receiver_object receiver_object;
 typedef struct receiver_writer receiver_writer;
