@@ -1,5 +1,5 @@
 package = "mtstates"
-version = "0.4.2-1"
+version = "0.4.3-1"
 local versionNumber = version:gsub("^(.*)-.-$", "%1")
 source = {
   url = "https://github.com/osch/lua-mtstates/archive/v"..versionNumber..".zip",
@@ -36,6 +36,8 @@ build = {
           "src/state.c",
           "src/error.c",
           "src/util.c",
+          "src/notify_capi_impl.c",
+          "src/receiver_capi_impl.c",
           "src/async_util.c",
           "src/mtstates_compat.c",
       },
