@@ -1,7 +1,6 @@
 version: 0.3.2.{build}
 
-os:
-- Windows Server 2012 R2
+image: Windows Server 2012 R2
 
 shallow_clone: true
 
@@ -23,9 +22,17 @@ cache:
   - c:\hererocks -> appveyor.yml
   - c:\external -> appveyor.yml
 
+
+
 install:
   - echo "Setup..."
-  - set PATH=C:\Python27\Scripts;%LR_EXTERNAL%;%PATH%
+  - set PATH=C:\Python38\;C:\Python38\Scripts;%LR_EXTERNAL%;%PATH%
+  - where py
+  - py --version
+  - where python
+  - python --version
+  - where pip
+  - pip --version
   - if /I "%platform%"=="x86" set HR_TARGET=vs_32
   - if /I "%platform%"=="x64" set HR_TARGET=vs_64
   - if /I "%platform%"=="mingw" set HR_TARGET=mingw
@@ -35,10 +42,9 @@ install:
       mkdir "%LR_EXTERNAL%\lib" &&
       mkdir "%LR_EXTERNAL%\include"
     )
-  - if not exist c:\hererocks (
-      pip install hererocks &&
-      hererocks c:\hererocks --%LUA% --target %HR_TARGET% -rlatest
-    )
+  - python -m pip install --upgrade pip
+  - pip install git+https://github.com/luarocks/hererocks@0.25.0
+  - hererocks c:\hererocks --%LUA% --target %HR_TARGET% -rlatest
   - call c:\hererocks\bin\activate
 
 before_build:
