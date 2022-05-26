@@ -2,13 +2,18 @@
 #define RECEIVER_CAPI_H
 
 #define RECEIVER_CAPI_ID_STRING     "_capi_receiver"
-#define RECEIVER_CAPI_VERSION_MAJOR  0
+#define RECEIVER_CAPI_VERSION_MAJOR  1
 #define RECEIVER_CAPI_VERSION_MINOR  0
-#define RECEIVER_CAPI_VERSION_PATCH  1
+#define RECEIVER_CAPI_VERSION_PATCH  0
 
-typedef struct receiver_object receiver_object;
-typedef struct receiver_writer receiver_writer;
-typedef struct receiver_capi   receiver_capi;
+#ifndef RECEIVER_CAPI_HAVE_LONG_LONG
+#  include <limits.h>
+#  if defined(LLONG_MAX)
+#    define RECEIVER_CAPI_HAVE_LONG_LONG 1
+#  else
+#    define RECEIVER_CAPI_HAVE_LONG_LONG 0
+#  endif
+#endif
 
 #ifndef RECEIVER_CAPI_IMPLEMENT_SET_CAPI
 #  define RECEIVER_CAPI_IMPLEMENT_SET_CAPI 0
@@ -17,6 +22,35 @@ typedef struct receiver_capi   receiver_capi;
 #ifndef RECEIVER_CAPI_IMPLEMENT_GET_CAPI
 #  define RECEIVER_CAPI_IMPLEMENT_GET_CAPI 0
 #endif
+
+typedef struct receiver_object      receiver_object;
+typedef struct receiver_writer      receiver_writer;
+typedef struct receiver_capi        receiver_capi;
+typedef enum   receiver_array_type  receiver_array_type;
+
+enum receiver_array_type
+{
+    RECEIVER_UCHAR  =  1,
+    RECEIVER_SCHAR  =  2,
+    
+    RECEIVER_SHORT  =  3,
+    RECEIVER_USHORT =  4,
+    
+    RECEIVER_INT    =  5,
+    RECEIVER_UINT   =  6,
+    
+    RECEIVER_LONG   =  7,
+    RECEIVER_ULONG  =  8,
+    
+    RECEIVER_FLOAT  =  9,
+    RECEIVER_DOUBLE = 10,
+
+#if RECEIVER_CAPI_HAVE_LONG_LONG
+    RECEIVER_LLONG  = 11,
+    RECEIVER_ULLONG = 12,
+#endif
+};
+
 
 /**
  * Type for pointer to function that may be called if an error occurs.
@@ -83,8 +117,8 @@ struct receiver_capi
     /**
      * Must be thread safe.
      *
-     * Send the writer's content to the receiver. If successfull, the writer's content
-     * is cleared.
+     * Send the writer's content as one message to the receiver. If successfull, the writer's 
+     * content is cleared.
      *
      * clear:    not 0 if old messages should be discarded (exact meaning depends on receiver implementation)
      *           0, if new message should be added.
@@ -140,6 +174,17 @@ struct receiver_capi
      * Does not need to be thread safe.
      */
     int  (*addBytesToWriter)(receiver_writer* w, const unsigned char* s, size_t len);
+    
+    /**
+     * Adds an array of primitive numeric C data types as one value.
+     * Does not need to be thread safe.
+     * Returns pointer to the reserved memory for unintialized array 
+     * elements. This pointer is valid until the next call to the writer.
+     * The caller is responsible for filling in the element data before 
+     * the next call to the writer.
+     */
+    void* (*addArrayToWriter)(receiver_writer* w, receiver_array_type t, 
+                              size_t elementCount);
 };
 
 

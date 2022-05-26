@@ -24,6 +24,7 @@ jobs:
     - name: setup 
       run: |
         luarocks install .github/workflows/lua-llthreads2-0.1.6-1.rockspec
+        luarocks --server=https://luarocks.org/dev install carray
         luarocks --server=https://luarocks.org/dev install mtmsg
         luarocks make rockspecs/mtstates-scm-0.rockspec
 
@@ -36,6 +37,7 @@ jobs:
         lua test02.lua
         lua test03.lua
         lua test04.lua
+        lua test05.lua
         cd ../examples
         lua example01.lua
         lua example02.lua

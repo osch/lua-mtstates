@@ -22,6 +22,7 @@ This package is also available via LuaRocks, see https://luarocks.org/modules/os
 [Lua]:               https://www.lua.org
 [Lanes]:             https://luarocks.org/modules/benoitgermain/lanes
 [lua-llthreads2]:    https://luarocks.org/modules/moteus/lua-llthreads2
+[carray]:            https://github.com/osch/lua-carray
 
 See below for full [reference documentation](#documentation).
 
@@ -185,7 +186,8 @@ assert(thread:join())
                 new created state.
     * *...*   - additional parameters, are transfered to the new state and
                 are given as arguments to the setup function. Arguments can be
-                simple data types (string, number, boolean, nil, light user data).
+                simple data types (string, number, boolean, nil, light user data)
+                or [carray] objects.
 
   This function returns a state referencing lua object with *state:isowner() == true*.
   
@@ -295,7 +297,7 @@ assert(thread:join())
   
   * *...* - All argument parameters are transfered to the state and given to the state
             callback function. Arguments can be simple data types (string, number,
-            boolean, nil, light user data).
+            boolean, nil, light user data) or [carray] objects.
 
   If the state callback function is processed in a concurrently running thread the 
   *state:call()* method waits for the other call to complete before the state callback
@@ -303,7 +305,7 @@ assert(thread:join())
   timeout parameter.
 
   Returns the results of the state callback function. Results can be simple data types 
-  (string, number, boolean, nil, light user data).
+  (string, number, boolean, nil, light user data) or [carray] objects.
 
   Possible errors: *mtstates.error.interrupted*,
                    *mtstates.error.invoking_state*,
@@ -321,11 +323,11 @@ assert(thread:join())
               
   * *...* - additional argument parameters are transfered to the state and given to the state
             callback function. Arguments can be simple data types (string, number,
-            boolean, nil, light user data).
+            boolean, nil, light user data) or [carray] objects.
 
   If the state could be accessed within the timeout *state:tcall()* returns the boolean
   value *true* and all results from the state callback function. Results can be simple 
-  data types (string, number, boolean, nil, light user data).
+  data types (string, number, boolean, nil, light user data) or [carray] objects.
   
   Returns *false* if the state could not be accessed during the timeout.
 

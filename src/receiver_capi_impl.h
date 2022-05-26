@@ -12,7 +12,8 @@ typedef enum {
     BUFFER_NUMBER,
     BUFFER_BOOLEAN,
     BUFFER_STRING,
-    BUFFER_SMALLSTRING
+    BUFFER_SMALLSTRING,
+    BUFFER_CARRAY
 } SerializeDataType;
 
 

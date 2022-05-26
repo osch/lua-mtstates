@@ -1,6 +1,7 @@
 #include "receiver_capi_impl.h"
 #include "state.h"
 #include "state_intern.h"
+#include "carray_capi.h"
 
 static receiver_object* toReceiver(lua_State* L, int index)
 {
@@ -160,6 +161,49 @@ static int addBytesToWriter(receiver_writer* writer, const unsigned char* value,
     return rc;
 }
 
+static void* addArrayToWriter(receiver_writer* writer, receiver_array_type type, 
+                              size_t elementCount)
+{
+    carray_type carrayType = 0;
+    size_t elementSize = 0;
+    switch (type) {
+        case RECEIVER_UCHAR: carrayType = CARRAY_UCHAR; elementSize = sizeof(unsigned char); break;
+        case RECEIVER_SCHAR: carrayType = CARRAY_SCHAR; elementSize = sizeof(signed char); break;
+        
+        case RECEIVER_SHORT:  carrayType = CARRAY_SHORT;  elementSize = sizeof(short); break;
+        case RECEIVER_USHORT: carrayType = CARRAY_USHORT; elementSize = sizeof(unsigned short); break;
+        
+        case RECEIVER_INT:    carrayType = CARRAY_INT;  elementSize = sizeof(int); break;
+        case RECEIVER_UINT:   carrayType = CARRAY_UINT; elementSize = sizeof(unsigned int); break;
+        
+        case RECEIVER_LONG:   carrayType = CARRAY_LONG;  elementSize = sizeof(long); break;
+        case RECEIVER_ULONG:  carrayType = CARRAY_ULONG; elementSize = sizeof(unsigned long); break;
+        
+        case RECEIVER_FLOAT:  carrayType = CARRAY_FLOAT;   elementSize = sizeof(float); break;
+        case RECEIVER_DOUBLE: carrayType = CARRAY_DOUBLE;  elementSize = sizeof(double); break;
+    
+    #if RECEIVER_CAPI_HAVE_LONG_LONG
+        case RECEIVER_LLONG:  carrayType = CARRAY_LLONG;   elementSize = sizeof(long long); break;
+        case RECEIVER_ULLONG: carrayType = CARRAY_ULLONG;  elementSize = sizeof(unsigned long long); break;
+    #endif
+        default: return NULL;
+    }
+    size_t len = 3 + sizeof(size_t) + elementSize * elementCount;
+    int rc = mtstates_membuf_reserve(&writer->mem, len);
+    if (rc == 0) {
+        unsigned char* dest = writer->mem.bufferStart + writer->mem.bufferLength;
+        *dest++ = BUFFER_CARRAY;
+        *dest++ = carrayType;
+        *dest++ = (unsigned char)elementSize;
+        memcpy(dest, &elementCount, sizeof(size_t));
+        dest += sizeof(size_t);
+        writer->mem.bufferLength += len;
+        writer->nargs += 1;
+        return dest;
+    } else {
+        return NULL;
+    }
+}
 
 static int msgToReceiver(receiver_object* receiver, receiver_writer* writer, 
                          int clear, int nonblock,
@@ -200,4 +244,5 @@ const receiver_capi mtstates_receiver_capi_impl =
     addIntegerToWriter,
     addStringToWriter,
     addBytesToWriter,
+    addArrayToWriter
 };

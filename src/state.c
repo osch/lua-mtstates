@@ -1,12 +1,15 @@
 #define   NOTIFY_CAPI_IMPLEMENT_SET_CAPI 1
 #define RECEIVER_CAPI_IMPLEMENT_SET_CAPI 1
 
+#define CARRAY_CAPI_IMPLEMENT_REQUIRE_CAPI 1
+
 #include "state.h"
 #include "error.h"
 #include "main.h"
 #include "state_intern.h"
 #include "notify_capi_impl.h"
 #include "receiver_capi_impl.h"
+#include "carray_capi.h"
 
 const char* const MTSTATES_STATE_CLASS_NAME = "mtstates.state";
 
@@ -179,7 +182,75 @@ static int dumpWriter(lua_State* L, const void* p, size_t sz, void* ud)
     }
 }
 
-static int pushArg(lua_State* L2, lua_State* L, int arg, lua_State* errorL)
+#if LUA_VERSION_NUM != 501
+/* in Lua 5.1 lua_pushcfunction may raise a memory error, 
+ * but 5.1 lua_cpcall does not raise error */
+static int lua_cpcall(lua_State* L, lua_CFunction func, void* ud)
+{
+    lua_pushcfunction(L, func);
+    lua_pushlightuserdata(L, ud);
+    return lua_pcall(L, 1, 0, 0);
+}
+#endif
+
+static void freeErrorMsg(ErrorMsg* errorMsg) 
+{
+    if (errorMsg->msg && errorMsg->msg != errorMsg->buffer) {
+        free(errorMsg->msg); 
+        errorMsg->msg = NULL;
+    }
+}
+
+static void setErrorMsg(ErrorMsg* errorMsg, lua_State* L2)
+{
+    freeErrorMsg(errorMsg);
+    
+    size_t len;
+    const char* l2_msg = lua_tolstring(L2, -1, &len);
+    char* new_msg = NULL;
+    size_t buflen = sizeof(errorMsg->buffer);
+    if (len + 1 > buflen) {
+        new_msg = malloc(len + 1);
+        if (new_msg) {
+            memcpy(new_msg, l2_msg, len + 1);
+            errorMsg->msg = new_msg; /* error message without stack trace */
+        }
+    } 
+    if (new_msg == NULL) {
+        if (len + 1 > buflen) {
+            len = buflen - 1;
+        }
+        errorMsg->msg = errorMsg->buffer;
+        memcpy(errorMsg->buffer, l2_msg, len);
+        errorMsg->buffer[len] = '\0';
+    }
+}
+
+typedef struct {
+    const carray_capi* carrayCapi;
+    carray_type carrayType;
+    size_t      elementSize;
+    size_t      elementCount;
+    const void* elementData;
+} NewCarrayParam;
+
+static int pushClonedCarray(lua_State* L)
+{
+    NewCarrayParam* param = (NewCarrayParam*) lua_touserdata(L, 1);
+    if (!param->carrayCapi) {
+        param->carrayCapi = carray_require_capi(L);
+    }
+    void* newData;
+    carray* a = param->carrayCapi->newCarray(L, param->carrayType, CARRAY_DEFAULT, 
+                                                param->elementCount, &newData);
+    if (!a) {
+        return luaL_error(L, "internal error creating carray");
+    }
+    memcpy(newData, param->elementData, param->elementSize * param->elementCount);
+    return 1;
+}
+
+static int pushArg(lua_State* L2, lua_State* L, int arg, const carray_capi** carrayCapi)
 {
     int tp = lua_type(L, arg);
     switch (tp) {
@@ -209,15 +280,51 @@ static int pushArg(lua_State* L2, lua_State* L, int arg, lua_State* errorL)
             lua_pushlightuserdata(L2, lua_touserdata(L, arg));
             break;
         }
+        case LUA_TUSERDATA: {
+            int errorReason;
+            const carray_capi* capi = carray_get_capi(L, arg, &errorReason);
+            if (capi) {
+                carray_info info;
+                const carray* a = capi->toReadableCarray(L, arg, &info);
+                if (a) {
+                    NewCarrayParam param = {0};
+                                   param.carrayType   = info.type;
+                                   param.elementSize  = info.elementSize;
+                                   param.elementCount = info.elementCount;
+                                   param.elementData  = capi->getReadableElementPtr(a, 0, info.elementCount);
+                                   param.carrayCapi   = *carrayCapi;
+                    lua_pushcfunction(L2, pushClonedCarray);
+                    lua_pushlightuserdata(L2, &param);
+                    int rc = lua_pcall(L2, 1, 1, 0);
+                    if (param.carrayCapi) {
+                        *carrayCapi = param.carrayCapi;
+                    }
+                    if (rc != LUA_OK) {
+                        int errorIndex = lua_gettop(L2);
+                        lua_pushfstring(L2, "error creating carray: %s", lua_tostring(L2, errorIndex));
+                        lua_remove(L2, errorIndex);
+                        return arg;
+                    }
+                    break;
+                } else {
+                    /* FALLTHROUGH */
+                }
+            } else if (errorReason == 1) {
+                lua_pushfstring(L2, "carray version mismatch");
+                return arg;
+            } else {
+                /* FALLTHROUGH */
+            }
+        }
         default: {
-            lua_pushfstring(errorL, "type '%s' not supported", lua_typename(L, tp));
+            lua_pushfstring(L2, "type '%s' not supported", lua_typename(L, tp));
             return arg;
         }
     }
     return 0;
 }
 
-static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, lua_State* errorL)
+static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, const carray_capi** carrayCapi)
 {
     int n = lastarg - firstarg + 1;
     if (!lua_checkstack(L2, n + LUA_MINSTACK)) {
@@ -225,7 +332,7 @@ static int pushArgs(lua_State* L2, lua_State* L, int firstarg, int lastarg, lua_
     }
     int arg;
     for (arg = firstarg; arg <= lastarg; ++arg) {
-        int rc = pushArg(L2, L, arg, errorL);
+        int rc = pushArg(L2, L, arg, carrayCapi);
         if (rc != 0) {
             return rc;
         }
@@ -287,7 +394,8 @@ static int Mtstates_newState1(lua_State* L, NewStateMode mode)
     lua_insert(L, 2);
 
     mtstates_membuf_init(&this->tmp, 0, 2);
-
+    
+    /* ============================================================= */
     int rc = lua_pcall(L, nargs + 1, LUA_MULTRET, 0);
     {
         if (this->globalLocked) {
@@ -301,24 +409,50 @@ static int Mtstates_newState1(lua_State* L, NewStateMode mode)
         }
         mtstates_membuf_free(&this->tmp);
     }
+    /* ============================================================= */
+
+    if (this->state) {
+        this->state->carrayCapi = this->carrayCapi;
+    }
     luaL_checkstack(L, LUA_MINSTACK, NULL);
-    
+
+    ErrorMsg* errorMsg = &this->errorMsg;
+ 
     if (rc != LUA_OK) {
         if (this->errorArg) {
-            if (this->errorArgMsg) {
-                lua_pushstring(L, this->errorArgMsg); 
-                free(this->errorArgMsg);
+            if (errorMsg->msg) {
+                lua_pushstring(L, errorMsg->msg); 
             }
+            freeErrorMsg(errorMsg);
             return luaL_argerror(L, this->errorArg - 1, lua_tostring(L, -1));
         } else {
+            freeErrorMsg(errorMsg);
             return lua_error(L);
         }
     } else {
+        freeErrorMsg(errorMsg);
         return this->nrslts;
     }
 }
 
-static int Mtstates_newState3(lua_State* L);
+static int Mtstates_newState3(lua_State* L2);
+
+static int callNewState3(lua_State* L2)
+{
+    NewStateVars* this = (NewStateVars*) lua_touserdata(L2, 1);
+
+    lua_pushcfunction(L2, errormsghandler1);   // may raise error in Lua 5.1
+    lua_pushcfunction(L2, Mtstates_newState3); // may raise error in Lua 5.1
+    lua_pushlightuserdata(L2, this);
+
+    int rc = lua_pcall(L2, 1, 0, -3);
+    
+    if (rc != LUA_OK) {
+        setErrorMsg(&this->errorMsg, L2);
+        return lua_error(L2);
+    }
+    return 0;
+}
 
 static int Mtstates_newState2(lua_State* L)
 {
@@ -547,21 +681,31 @@ static int Mtstates_newState2(lua_State* L)
     }
     this->L2 = L2;
     {
-        lua_pushcfunction(L2, errormsghandler1);
-        lua_pushcfunction(L2, Mtstates_newState3);
-        lua_pushlightuserdata(L2, this);
-    
-        int rc = lua_pcall(L2, 1, 0, -3);
-    
+        int rc = lua_cpcall(L2, callNewState3, this);
+
+        ErrorMsg* errorMsg = &this->errorMsg;
+        
         if (rc != LUA_OK) {
+            if (errorMsg->msg) {
+                lua_pushstring(L, errorMsg->msg); 
+            }
+            else {
+                if (lua_type(L2, -1) == LUA_TSTRING) {
+                    lua_pushstring(L, lua_tostring(L2, -1)); 
+                } else {
+                    lua_pushstring(L, "unknown error"); 
+                }
+            }
+            lua_pop(L2, 1);
             if (this->isLError) {
-                lua_pushstring(L, lua_tostring(L2, -1));
+                freeErrorMsg(errorMsg);
                 return lua_error(L);
             } else {
-                return mtstates_ERROR_INVOKING_STATE(L, NULL, lua_tostring(L2, -1));
+                freeErrorMsg(errorMsg);
+                return mtstates_ERROR_INVOKING_STATE(L, NULL, lua_tostring(L, -1));
             }
         } else {
-            lua_pop(L2, 1); /* pop msghandler */
+            freeErrorMsg(errorMsg);
             return this->nrslts;
         }
     }
@@ -599,16 +743,16 @@ static int Mtstates_newState3(lua_State* L2)
     if (rc != LUA_OK) {
         this->errorArg = this->stateFunction;
         this->isLError = true;
-        setErrorArgMsg(&this->errorArgMsg, L2);
+        setErrorMsg(&this->errorMsg, L2);
         return lua_error(L2); /* error has bee pushed by loadbuffer */
     }
     int func = lua_gettop(L2);
-    rc = pushArgs(L2, L, this->firstArg, this->lastArg, L2);
+    rc = pushArgs(L2, L, this->firstArg, this->lastArg, &this->carrayCapi);
     if (rc != 0) {
         if (rc > 0) {
             this->errorArg = rc;
             this->isLError = true;
-            setErrorArgMsg(&this->errorArgMsg, L2);
+            setErrorMsg(&this->errorMsg, L2);
             return lua_error(L2); /* error has been pushed by pushArgs */
         } else {
             this->isLError = true;
@@ -623,10 +767,10 @@ static int Mtstates_newState3(lua_State* L2)
     int lastrslt  = lua_gettop(L2);
     int nrslts = lastrslt - firstrslt + 1;
     if (nrslts >= 2) {
-        rc = pushArgs(L, L2, firstrslt + 1, lastrslt, L2);
+        rc = pushArgs(L, L2, firstrslt + 1, lastrslt, &this->carrayCapi);
         if (rc != 0) {
             if (rc > 0) {
-                lua_pushfstring(L2, "state setup function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L2, -1));
+                lua_pushfstring(L2, "state setup function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
                 mtstates_push_ERROR_STATE_RESULT(L2, NULL, lua_tostring(L2, -1));
                 this->isLError = true;
                 return lua_error(L2);
@@ -816,6 +960,7 @@ static int MtState_call4(lua_State* L2);
 typedef struct {
     receiver_writer* w;
     int callbackRef;
+    const carray_capi* carrayCapi;
 } MtState_call3a_UserData;
 
 static int MtState_call(lua_State* L)
@@ -835,15 +980,6 @@ static int MtState_call2(lua_State* L, bool isTimed)
     return mtstates_state_call(L, isTimed, arg, udata->state, NULL, NULL, NULL);
 }
 
-#if LUA_VERSION_NUM != 501
-static int lua_cpcall(lua_State* L, lua_CFunction func, void* ud)
-{
-    lua_pushcfunction(L, func);
-    lua_pushlightuserdata(L, ud);
-    return lua_pcall(L, 1, 0, 0);
-}
-#endif
-
 int mtstates_state_call(lua_State* L, bool isTimed, int arg, 
                         MtState* s, receiver_writer* w,
                         notifier_error_handler notify_eh, void* notify_ehdata)
@@ -862,6 +998,43 @@ int mtstates_state_call(lua_State* L, bool isTimed, int arg,
         }
         endTime = mtstates_current_time_seconds() + waitSeconds;
     }
+
+    /* ------------------------------------------------------------------- */
+
+    CallStateVars vars;
+    CallStateVars* this = NULL;
+    int msgh = 0;
+    int func = 1;
+    
+    if (L) 
+    {
+        memset(&vars, 0, sizeof(CallStateVars));
+        this = &vars;
+        this->L             = L;
+        this->carrayCapi    = s->carrayCapi;
+        this->isTimed       = isTimed;
+        this->state         = s;
+        this->firstArg      = arg;
+        this->lastArg       = lastArg;
+
+        if (L == s->L2) 
+        {
+            lua_pushcfunction(L, errormsghandler1);
+            lua_insert(L, 1);
+            msgh = 1;
+            func = 2;
+        }
+        
+        lua_pushcfunction(L, MtState_call3);
+        lua_insert(L, func);
+        
+        lua_pushlightuserdata(L, this);
+        lua_replace(L, func + 1);
+    
+        luaL_checkstack(L, LUA_MINSTACK, NULL);
+    }
+    
+    /* ------------------------------------------------------------------- */
 
     if (!isTimed || waitSeconds > 0) {
         async_mutex_lock(&s->stateMutex);
@@ -913,35 +1086,9 @@ int mtstates_state_call(lua_State* L, bool isTimed, int arg,
     
     if (L) 
     {
-       CallStateVars vars; memset(&vars, 0, sizeof(CallStateVars));
-       CallStateVars* this = &vars;
-       
-       this->L             = L;
-       this->isTimed       = isTimed;
-       this->state         = s;
-       this->firstArg      = arg;
-       this->lastArg       = lastArg;
-    
-        int msgh = 0;
-        int func = 1;
-        if (L == s->L2) 
-        {
-            lua_pushcfunction(L, errormsghandler1);
-            lua_insert(L, 1);
-            msgh = 1;
-            func = 2;
-        }
-        
-        lua_pushcfunction(L, MtState_call3);
-        lua_insert(L, func);
-        
-        lua_pushlightuserdata(L, this);
-        lua_replace(L, func + 1);
-    
         int l2start = lua_gettop(s->L2);
     
         int rc = lua_pcall(L, nargs, LUA_MULTRET, msgh);
-        luaL_checkstack(L, LUA_MINSTACK, NULL);
     
         /* ------------------------------------------------------------------- */
     
@@ -961,17 +1108,24 @@ int mtstates_state_call(lua_State* L, bool isTimed, int arg,
         
         /* ------------------------------------------------------------------- */
     
+        s->carrayCapi = this->carrayCapi;
+        luaL_checkstack(L, LUA_MINSTACK, NULL);
+
+        ErrorMsg* errorMsg = &this->errorMsg;
+
         if (rc != LUA_OK) {
             if (this->errorArg) {
-                if (this->errorArgMsg) {
-                    lua_pushstring(L, this->errorArgMsg); 
-                    free(this->errorArgMsg);
+                if (errorMsg->msg) {
+                    lua_pushstring(L, errorMsg->msg); 
                 }
+                freeErrorMsg(errorMsg);
                 return luaL_argerror(L, this->errorArg, lua_tostring(L, -1));
             } else {
+                freeErrorMsg(errorMsg);
                 return lua_error(L);
             }
         } else {
+            freeErrorMsg(errorMsg);
             return this->nrslts;
         }
     }
@@ -986,10 +1140,13 @@ int mtstates_state_call(lua_State* L, bool isTimed, int arg,
             MtState_call3a_UserData ud3a;
             ud3a.w = w;
             ud3a.callbackRef = s->callbackref;
+            ud3a.carrayCapi = s->carrayCapi;
             
             int l2start = lua_gettop(s->L2);
             int lua_rc = lua_cpcall(s->L2, MtState_call3a, &ud3a);
-
+            
+            s->carrayCapi = ud3a.carrayCapi;
+            
             if (lua_rc != LUA_OK) {
                 if (notify_eh) {
                     size_t       msglen = 0;
@@ -1018,6 +1175,24 @@ int mtstates_state_call(lua_State* L, bool isTimed, int arg,
         /* ------------------------------------------------------------------- */
     }
 }
+
+static int MtState_callCall3(lua_State* L2)
+{
+    CallStateVars* this = (CallStateVars*)lua_touserdata(L2, 1);
+    MtState*   s  = this->state;
+
+    lua_pushcfunction(L2, errormsghandler1); // may raise error in Lua 5.1
+    lua_pushcfunction(L2, MtState_call4);
+    lua_pushlightuserdata(L2, this);
+ 
+    int rc = lua_pcall(L2, 1, 0, -3);
+
+    if (rc != LUA_OK) {
+        setErrorMsg(&this->errorMsg, L2);
+        return lua_error(L2);
+    }
+    return 0;
+}
     
 static int MtState_call3(lua_State* L)
 {
@@ -1027,21 +1202,32 @@ static int MtState_call3(lua_State* L)
     lua_State* L2 = s->L2;
 
     if (L2 != L) {
-        lua_pushcfunction(L2, errormsghandler1);
-        lua_pushcfunction(L2, MtState_call4);
-        lua_pushlightuserdata(L2, this);
-     
-        int rc = lua_pcall(L2, 1, 0, -3);
-    
+        int rc = lua_cpcall(L2, MtState_callCall3, this);
+
+        ErrorMsg* errorMsg = &this->errorMsg;
+
         if (rc != LUA_OK) {
+            if (errorMsg->msg) {
+                lua_pushstring(L, errorMsg->msg); 
+            }
+            else {
+                if (lua_type(L2, -1) == LUA_TSTRING) {
+                    lua_pushstring(L, lua_tostring(L2, -1)); 
+                } else {
+                    lua_pushstring(L, "unknown error"); 
+                }
+            }
+            lua_pop(L2, 1);
             if (this->isLError) {
-                lua_pushstring(L, lua_tostring(L2, -1));
+                freeErrorMsg(errorMsg);
                 return lua_error(L);
             } else {
-                const char* stateString = mtstates_state_tostring(L, s);
-                return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L2, -1));
+                const char* stateString = mtstates_state_tostring(L, s); /* -> errorString, stateString */
+                freeErrorMsg(errorMsg);
+                return mtstates_ERROR_INVOKING_STATE(L, stateString, lua_tostring(L, -2));
             }
         } else {
+            freeErrorMsg(errorMsg);
             return this->nrslts;
         }
     } else {
@@ -1106,6 +1292,24 @@ static int MtState_call3a(lua_State* L2)
                     from += len;
                     break;
                 }
+                case BUFFER_CARRAY: {
+                    if (!ud3a->carrayCapi) {
+                        ud3a->carrayCapi = carray_require_capi(L2);
+                    }
+                    carray_type   type        = (unsigned char) (*from++);
+                    unsigned char elementSize = (unsigned char) (*from++);
+                    size_t        elementCount;
+                    memcpy(&elementCount, from, sizeof(size_t));
+                    from += sizeof(size_t);
+                    void* data;
+                    if (!ud3a->carrayCapi->newCarray(L2, type, CARRAY_DEFAULT, elementCount, &data)) {
+                        luaL_error(L2, "internal error creating carray for type %d", type);
+                    }
+                    size_t len = elementSize * elementCount;
+                    memcpy(data, from, len);
+                    from += len;
+                    break;
+                }
             }
         }
     }
@@ -1125,12 +1329,12 @@ static int MtState_call4(lua_State* L2)
 
     lua_rawgeti(L2, LUA_REGISTRYINDEX, s->callbackref);
     int func = lua_gettop(L2);
-    int rc = pushArgs(L2, L, this->firstArg, this->lastArg, L2);
+    int rc = pushArgs(L2, L, this->firstArg, this->lastArg, &this->carrayCapi);
     if (rc != 0) {
         if (rc > 0) {
             this->errorArg = rc;
             this->isLError = true;
-            setErrorArgMsg(&this->errorArgMsg, L2);
+            setErrorMsg(&this->errorMsg, L2);
             return lua_error(L2);  /* error has been pushed by pushArgs */
         } else {
             this->isLError = true;
@@ -1147,10 +1351,10 @@ static int MtState_call4(lua_State* L2)
         nrslts += 1;
         lua_pushboolean(L, true);
     }
-    rc = pushArgs(L, L2, firstrslt, lastrslt, L2);
+    rc = pushArgs(L, L2, firstrslt, lastrslt, &this->carrayCapi);
     if (rc != 0) {
         if (rc > 0) {
-            lua_pushfstring(L2, "state callback function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L2, -1));
+            lua_pushfstring(L2, "state callback function returned bad parameter #%d: %s", rc - firstrslt + 1, lua_tostring(L, -1));
             mtstates_push_ERROR_STATE_RESULT(L2, NULL, lua_tostring(L2, -1));
             this->isLError = true;
             return lua_error(L2);

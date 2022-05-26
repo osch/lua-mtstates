@@ -47,6 +47,7 @@ before_build:
 build_script:
   - echo "Making..."
   - luarocks install lua-llthreads2
+  - luarocks --server=https://luarocks.org/dev install carray
   - luarocks --server=https://luarocks.org/dev install mtmsg
   - luarocks make rockspecs/mtstates-scm-0.rockspec
 
@@ -60,6 +61,7 @@ test_script:
   - lua test02.lua
   - lua test03.lua
   - lua test04.lua
+  - lua test05.lua
   - cd %APPVEYOR_BUILD_FOLDER%\examples
   - lua example01.lua
   - lua example02.lua

@@ -2,6 +2,7 @@
 #define MTSTATES_STATE_INTERN
 
 typedef struct receiver_writer receiver_writer;
+typedef struct carray_capi     carray_capi;
 
 typedef struct MtState {
     lua_Integer        id;
@@ -14,6 +15,7 @@ typedef struct MtState {
     Mutex              stateMutex;
     lua_State*         L2;
     int                callbackref;
+    const carray_capi* carrayCapi;
 
     bool               isBusy;
     ThreadId           calledByThread;
@@ -34,6 +36,12 @@ typedef enum {
     SINGLETON
 } NewStateMode;
 
+typedef struct
+{
+    char* msg;
+    char  buffer[100];
+} ErrorMsg;
+
 typedef struct 
 {
     NewStateMode newStateMode;
@@ -42,6 +50,7 @@ typedef struct
     bool stateLocked;
     
     lua_State* L;
+    const carray_capi* carrayCapi;
 
     int         stateFunction;
     const char* stateCode;
@@ -57,10 +66,10 @@ typedef struct
     lua_State* L2;
     
     bool isLError;
+    int  errorArg;
     
-    int   errorArg;
-    char* errorArgMsg;
-
+    ErrorMsg errorMsg;
+    
     int nrslts;
 
 } NewStateVars;
@@ -72,14 +81,15 @@ typedef struct
     bool isTimed;
     
     MtState* state;
+    const carray_capi* carrayCapi;
     
     int firstArg;
     int lastArg;
 
     bool isLError;
+    int  errorArg;
 
-    int   errorArg;
-    char* errorArgMsg;
+    ErrorMsg errorMsg;
     
     int nrslts;
 
@@ -90,17 +100,6 @@ typedef struct StateUserData {
     bool             isOwner;
 } StateUserData;
 
-
-static void setErrorArgMsg(char** errorArgMsg, lua_State* L2)
-{
-    size_t len;
-    const char* lmsg = lua_tolstring(L2, -1, &len);
-    char* msg = malloc(len + 1);
-    if (msg) {
-        memcpy(msg, lmsg, len + 1);
-        *errorArgMsg = msg; /* error message without stack trace */
-    }
-}
 
 void mtstates_state_free(MtState* state);
 
