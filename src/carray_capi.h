@@ -11,9 +11,9 @@
 #endif
 
 #define CARRAY_CAPI_ID_STRING     "_capi_carray"
-#define CARRAY_CAPI_VERSION_MAJOR  -1
+#define CARRAY_CAPI_VERSION_MAJOR  -2
 #define CARRAY_CAPI_VERSION_MINOR   0
-#define CARRAY_CAPI_VERSION_PATCH   1
+#define CARRAY_CAPI_VERSION_PATCH   0
 
 typedef struct carray_capi     carray_capi;
 typedef struct carray_info     carray_info;
@@ -69,6 +69,7 @@ struct carray_info
     carray_attr attr;
     size_t      elementSize;
     size_t      elementCount;
+    size_t      elementCapacity;
 };
 
 /**
@@ -186,6 +187,20 @@ struct carray_capi
      * otherwise behaviour may be undefined.
      */
     const void* (*getReadableElementPtr)(const carray* a, size_t offset, size_t count);
+    
+    /**
+     * Resizes the array.
+     *
+     * newElementCount - new number of elements. If this is larger than the current 
+     *                   element count, the new elements are uninitialized.
+     *
+     * shrinkCapacity  - flag, if true the capacity is set to the new size.
+     *
+     * Returns pointer to the first element in the array. The caller may read
+     * or write newElementCount bytes at this pointer.
+     * Returns NULL on failure or if newElementCount == 0.
+     */
+    void* (*resizeCarray)(carray* a, size_t newElementCount, int shrinkCapacity);
 };
 
 #if CARRAY_CAPI_IMPLEMENT_SET_CAPI

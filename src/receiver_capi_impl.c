@@ -56,6 +56,7 @@ static void freeWriter(receiver_writer* writer)
 {
     if (writer) {
         mtstates_membuf_free(&writer->mem);
+        free(writer);
     }
 }
 
