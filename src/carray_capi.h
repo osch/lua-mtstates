@@ -197,7 +197,7 @@ struct carray_capi
      * shrinkCapacity  - flag, if true the capacity is set to the new size.
      *
      * Returns pointer to the first element in the array. The caller may read
-     * or write newElementCount bytes at this pointer.
+     * or write newElementCount elements at this pointer.
      * Returns NULL on failure or if newElementCount == 0.
      */
     void* (*resizeCarray)(carray* a, size_t newElementCount, int shrinkCapacity);
