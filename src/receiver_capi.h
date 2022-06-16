@@ -23,10 +23,22 @@
 #  define RECEIVER_CAPI_IMPLEMENT_GET_CAPI 0
 #endif
 
+#ifdef __cplusplus
+
+extern "C" {
+
+struct receiver_object;
+struct receiver_writer;
+struct receiver_capi;
+
+#else /* __cplusplus */
+
 typedef struct receiver_object      receiver_object;
 typedef struct receiver_writer      receiver_writer;
 typedef struct receiver_capi        receiver_capi;
 typedef enum   receiver_array_type  receiver_array_type;
+
+#endif /* ! __cplusplus */
 
 enum receiver_array_type
 {
@@ -198,7 +210,7 @@ struct receiver_capi
 static int receiver_set_capi(lua_State* L, int index, const receiver_capi* capi)
 {
     lua_pushlstring(L, RECEIVER_CAPI_ID_STRING, strlen(RECEIVER_CAPI_ID_STRING));           /* -> key */
-    void** udata = lua_newuserdata(L, sizeof(void*) + strlen(RECEIVER_CAPI_ID_STRING) + 1); /* -> key, value */
+    void** udata = (void**) lua_newuserdata(L, sizeof(void*) + strlen(RECEIVER_CAPI_ID_STRING) + 1); /* -> key, value */
     *udata = (void*)capi;
     strcpy((char*)(udata + 1), RECEIVER_CAPI_ID_STRING);  /* -> key, value */
     lua_rawset(L, (index < 0) ? (index - 2) : index);     /* -> */
@@ -218,14 +230,14 @@ static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* erro
 {
     if (luaL_getmetafield(L, index, RECEIVER_CAPI_ID_STRING) != LUA_TNIL)      /* -> _capi */
     {
-        void** udata = lua_touserdata(L, -1);                                  /* -> _capi */
+        const void** udata = (const void**) lua_touserdata(L, -1);             /* -> _capi */
 
         if (   udata
             && (lua_rawlen(L, -1) >= sizeof(void*) + strlen(RECEIVER_CAPI_ID_STRING) + 1)
             && (memcmp((char*)(udata + 1), RECEIVER_CAPI_ID_STRING, 
                        strlen(RECEIVER_CAPI_ID_STRING) + 1) == 0))
         {
-            const receiver_capi* capi = *udata;                                /* -> _capi */
+            const receiver_capi* capi = (const receiver_capi*) *udata;         /* -> _capi */
             while (capi) {
                 if (   capi->version_major == RECEIVER_CAPI_VERSION_MAJOR
                     && capi->version_minor >= RECEIVER_CAPI_VERSION_MINOR)
@@ -233,7 +245,7 @@ static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* erro
                     lua_pop(L, 1);                                             /* -> */
                     return capi;
                 }
-                capi = capi->next_capi;
+                capi = (const receiver_capi*) capi->next_capi;
             }
             if (errorReason) {
                 *errorReason = 1;
@@ -252,5 +264,9 @@ static const receiver_capi* receiver_get_capi(lua_State* L, int index, int* erro
     return NULL;
 }
 #endif /* RECEIVER_CAPI_IMPLEMENT_GET_CAPI */
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* RECEIVER_CAPI_H */

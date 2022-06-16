@@ -15,13 +15,6 @@
 #define CARRAY_CAPI_VERSION_MINOR   0
 #define CARRAY_CAPI_VERSION_PATCH   0
 
-typedef struct carray_capi     carray_capi;
-typedef struct carray_info     carray_info;
-typedef struct carray          carray;
-
-typedef enum carray_type  carray_type;
-typedef enum carray_attr  carray_attr;
-
 #ifndef CARRAY_CAPI_IMPLEMENT_SET_CAPI
 #  define CARRAY_CAPI_IMPLEMENT_SET_CAPI 0
 #endif
@@ -33,6 +26,25 @@ typedef enum carray_attr  carray_attr;
 #ifndef CARRAY_CAPI_IMPLEMENT_GET_CAPI
 #  define CARRAY_CAPI_IMPLEMENT_GET_CAPI 0
 #endif
+
+#ifdef __cplusplus
+
+extern "C" {
+
+struct carray_capi;
+struct carray_info;
+struct carray;
+
+#else /* __cplusplus */
+
+typedef struct carray_capi     carray_capi;
+typedef struct carray_info     carray_info;
+typedef struct carray          carray;
+
+typedef enum carray_type  carray_type;
+typedef enum carray_attr  carray_attr;
+
+#endif /* ! __cplusplus */
 
 enum carray_type
 {
@@ -213,7 +225,7 @@ struct carray_capi
 static int carray_set_capi(lua_State* L, int index, const carray_capi* capi)
 {
     lua_pushlstring(L, CARRAY_CAPI_ID_STRING, strlen(CARRAY_CAPI_ID_STRING));             /* -> key */
-    void** udata = lua_newuserdata(L, sizeof(void*) + strlen(CARRAY_CAPI_ID_STRING) + 1); /* -> key, value */
+    void** udata = (void**) lua_newuserdata(L, sizeof(void*) + strlen(CARRAY_CAPI_ID_STRING) + 1); /* -> key, value */
     *udata = (void*)capi;
     strcpy((char*)(udata + 1), CARRAY_CAPI_ID_STRING);    /* -> key, value */
     lua_rawset(L, (index < 0) ? (index - 2) : index);     /* -> */
@@ -233,14 +245,14 @@ static const carray_capi* carray_get_capi(lua_State* L, int index, int* errorRea
 {
     if (luaL_getmetafield(L, index, CARRAY_CAPI_ID_STRING) != LUA_TNIL)      /* -> _capi */
     {
-        void** udata = lua_touserdata(L, -1);                                /* -> _capi */
+        const void** udata = (const void**) lua_touserdata(L, -1);           /* -> _capi */
 
         if (   udata
             && (lua_rawlen(L, -1) >= sizeof(void*) + strlen(CARRAY_CAPI_ID_STRING) + 1)
             && (memcmp((char*)(udata + 1), CARRAY_CAPI_ID_STRING, 
                        strlen(CARRAY_CAPI_ID_STRING) + 1) == 0))
         {
-            const carray_capi* capi = *udata;                                /* -> _capi */
+            const carray_capi* capi = (const carray_capi*) *udata;           /* -> _capi */
             while (capi) {
                 if (   capi->version_major == CARRAY_CAPI_VERSION_MAJOR
                     && capi->version_minor >= CARRAY_CAPI_VERSION_MINOR)
@@ -248,7 +260,7 @@ static const carray_capi* carray_get_capi(lua_State* L, int index, int* errorRea
                     lua_pop(L, 1);                                           /* -> */
                     return capi;
                 }
-                capi = capi->next_capi;
+                capi = (const carray_capi*) capi->next_capi;
             }
             if (errorReason) {
                 *errorReason = 1;
@@ -290,5 +302,9 @@ static const carray_capi* carray_require_capi(lua_State* L)
 }
 
 #endif /* CARRAY_CAPI_IMPLEMENT_REQUIRE_CAPI */
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* CARRAY_CAPI_H */
