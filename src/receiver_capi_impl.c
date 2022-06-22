@@ -243,6 +243,7 @@ const receiver_capi mtstates_receiver_capi_impl =
     clearWriter,
     addBooleanToWriter,
     addIntegerToWriter,
+    addNumberToWriter,
     addStringToWriter,
     addBytesToWriter,
     addArrayToWriter

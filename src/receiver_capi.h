@@ -2,7 +2,7 @@
 #define RECEIVER_CAPI_H
 
 #define RECEIVER_CAPI_ID_STRING     "_capi_receiver"
-#define RECEIVER_CAPI_VERSION_MAJOR  1
+#define RECEIVER_CAPI_VERSION_MAJOR  2
 #define RECEIVER_CAPI_VERSION_MINOR  0
 #define RECEIVER_CAPI_VERSION_PATCH  0
 
@@ -175,6 +175,8 @@ struct receiver_capi
      * Does not need to be thread safe.
      */
     int  (*addIntegerToWriter)(receiver_writer* w, lua_Integer i);
+
+    int  (*addNumberToWriter)(receiver_writer* w, lua_Number number);
 
     /**
      * Does not need to be thread safe.
