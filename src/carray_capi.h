@@ -11,7 +11,7 @@
 #endif
 
 #define CARRAY_CAPI_ID_STRING     "_capi_carray"
-#define CARRAY_CAPI_VERSION_MAJOR  -2
+#define CARRAY_CAPI_VERSION_MAJOR   1
 #define CARRAY_CAPI_VERSION_MINOR   0
 #define CARRAY_CAPI_VERSION_PATCH   0
 
@@ -77,7 +77,7 @@ enum carray_attr
 
 struct carray_info
 {
-    carray_type type;
+    carray_type elementType;
     carray_attr attr;
     size_t      elementSize;
     size_t      elementCount;
@@ -206,13 +206,55 @@ struct carray_capi
      * newElementCount - new number of elements. If this is larger than the current 
      *                   element count, the new elements are uninitialized.
      *
-     * shrinkCapacity  - flag, if true the capacity is set to the new size.
+     * reservePercent  - if < 0 the capacity is set to the new size,
+     *                   if == 0 the capacity remains if the new size is smaller
+     *                           than current capacity.
+     *                   if > 0 the capacity gets a reserve of reservePercent percent
+     *                   if capacity needs to be increased. E.g. if reservePercent == 100
+     *                   the capacity is doubled if newElementCount exceeds the current
+     *                   capacity.
      *
      * Returns pointer to the first element in the array. The caller may read
      * or write newElementCount elements at this pointer.
      * Returns NULL on failure or if newElementCount == 0.
      */
-    void* (*resizeCarray)(carray* a, size_t newElementCount, int shrinkCapacity);
+    void* (*resizeCarray)(carray* a, size_t newElementCount, int reservePercent);
+    
+    /**
+     * Insert Elements.
+     *
+     * offset       - index of the first new element, 0 <= offset <= elementCount
+     * insertCount  - number of elements to be inserted
+     *
+     * reservePercent  - if < 0 the capacity is set to the new size,
+     *                   if == 0 the capacity remains if the new size is smaller
+     *                           than current capacity.
+     *                   if > 0 the capacity gets a reserve of reservePercent percent
+     *                   if capacity needs to be increased. E.g. if reservePercent == 100
+     *                   the capacity is doubled if new element count exceeds the current
+     *                   capacity.
+     *
+     * Returns pointer to the first new element in the array. The caller may write 
+     * insertCount elements at this pointer.
+     * Returns NULL on failure or if insertCount == 0.
+     */
+    void* (*insertElements)(carray* a, size_t offset, size_t insertCount, int reservePercent);
+
+    /**
+     * Insert Elements.
+     *
+     * offset       - index of the first element to be removed, 0 <= offset < elementCount
+     * removeCount  - number of elements to be removed
+     *
+     * reservePercent  - if < 0 the capacity is set to the new size,
+     *                   if == 0 the capacity remains if the new size is smaller
+     *                           than current capacity.
+     *                   if > 0 the capacity gets a reserve of reservePercent percent
+     *                   if capacity needs to be increased. E.g. if reservePercent == 100
+     *                   the capacity is doubled if new element count exceeds the current
+     *                   capacity.
+     */
+    void  (*removeElements)(carray* a, size_t offset, size_t count, int reservePercent);
 };
 
 #if CARRAY_CAPI_IMPLEMENT_SET_CAPI

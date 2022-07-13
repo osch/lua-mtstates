@@ -288,7 +288,7 @@ static int pushArg(lua_State* L2, lua_State* L, int arg, const carray_capi** car
                 const carray* a = capi->toReadableCarray(L, arg, &info);
                 if (a) {
                     NewCarrayParam param = {0};
-                                   param.carrayType   = info.type;
+                                   param.carrayType   = info.elementType;
                                    param.elementSize  = info.elementSize;
                                    param.elementCount = info.elementCount;
                                    param.elementData  = capi->getReadableElementPtr(a, 0, info.elementCount);
