@@ -1,5 +1,5 @@
 package = "mtstates"
-version = "0.4.3-1"
+version = "0.4.4-1"
 local versionNumber = version:gsub("^(.*)-.-$", "%1")
 source = {
   url = "https://github.com/osch/lua-mtstates/archive/v"..versionNumber..".zip",
