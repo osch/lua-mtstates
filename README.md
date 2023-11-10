@@ -167,7 +167,7 @@ assert(thread:join())
 
 ### Module Functions
 
-* <a id="newstate">**`mtstates.newstate([name,][libs,]setup[,...)`**</a>
+* <span id="newstate">**`mtstates.newstate([name,][libs,]setup[,...)`**</span>
 
   Creates a new state. The given setup function is executed in the new state. The
   setup function must return a state callback function which can be called
@@ -313,7 +313,7 @@ assert(thread:join())
                    *mtstates.error.state_result*
 
 
-* <a id="tcall">**`state:tcall(timeout, ...)`**</a>
+* <span id="tcall">**`state:tcall(timeout, ...)`**</span>
 
   Invokes the state callback function that was returned by the state setup function
   when the state was created with *mtstates.newstate()*.
